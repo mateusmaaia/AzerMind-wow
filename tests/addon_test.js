@@ -1314,6 +1314,44 @@ test('guide references validate atomically and travel independently of character
 });
 
 
+test('guide editor takes keyboard focus, refocuses on blank-area clicks and preserves variant URLs', () => {
+  const vm = newVM(); login(vm);
+  const url = 'https://mobalytics.gg/wow-forever/classes/mage-leveling-guide?ws-ngf5-26=activeVariantId%2C7';
+  vm.run(`
+    AzerMind.CodexPrompt()
+    for _,side in ipairs(AzerMindGeneralSettings.children) do
+      for _,button in ipairs(side.children or {}) do
+        if button.text=="Guide references" then button.scripts.OnClick(button) end
+      end
+    end
+  `);
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'true', 'opening the editor directs paste to the guide field');
+  vm.run(`
+    local input = AzerMindGuideSettings.input
+    input.scripts.OnEscapePressed(input)
+  `);
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'false');
+  vm.run(`
+    local scroll = AzerMindGuideSettings.input:GetParent()
+    if scroll.scripts.OnMouseDown then scroll.scripts.OnMouseDown(scroll, "LeftButton") end
+  `);
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'true', 'clicking the empty scroll surface restores keyboard focus');
+  vm.run(`STUB.focus:Insert(${JSON.stringify(url)}); AzerMindGuideSettings.input.scripts.OnTextChanged()`);
+  assert.equal(vm.evaluate('AzerMindGuideSettings.dirty'), 'true');
+  assert.equal(vm.evaluate('AzerMind.GuideReferences()'), '', 'pasting does not save automatically');
+  vm.run('AzerMindGuideSettings.input:ClearFocus(); AzerMind.ShowGuideSettings()');
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'true', 'reopening an unsaved draft restores focus');
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:GetText()'), url);
+  vm.run('AzerMindGuideSettings.save.scripts.OnClick()');
+  assert.equal(vm.evaluate('AzerMind.GuideReferences()'), url, 'Save keeps the selected build query exactly');
+  vm.run('AzerMindGuideSettings:Hide()');
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'false', 'closing releases the keyboard');
+  vm.run('AzerMind.ShowGuideSettings()');
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'true');
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:GetText()'), url);
+  assert.equal(vm.evaluate('AzerMindDB.chats[1].pendingId'), null, 'editing guide settings does not send a chat');
+});
+
 test('provider choices stay isolated and survive outgoing transport', () => {
   const vm = newVM(); login(vm); connect(vm,'agentSettings={claude={model="sonnet",efforts={},models={{model="sonnet",efforts={"high"}}}}},');
   vm.run(`
