@@ -21,6 +21,15 @@ AzerMind is a fork of [wow-ai by chelinho139](https://github.com/chelinho139/wow
 
 The bundled snapshot includes **21,442 items, 5,233 quests, 13,417 NPCs and 7,045 objects**. Coverage is incomplete: records do not prove ownership, quest eligibility, current availability or drop rates.
 
+### Optional AHledger prices
+
+With the AHledger addon enabled, item picker tooltips and item attachments include
+auction prices, market, quantity and observation time from its local API. Bundled
+snapshots are marked explicitly. Prices are per unit and are not guaranteed sale
+values. Without AHledger or an available price, browsing works as usual.
+AHledger sync refreshes its data; AzerMind makes no network requests for prices.
+Prices from [AHledger](https://ahledger.com); see its [integration documentation](https://ahledger.com/developers).
+
 ## Requirements
 
 - **World of Warcraft: Forever**, interface **16001**. Compatibility with Retail or other Classic clients is not established.

@@ -39,7 +39,7 @@ function AzerMind.CodexPrompt(id)
 		local function Navigate(action)
 			if p.dirty or p.pending then p.message="Save or cancel changes before switching settings."; p.Refresh(); return end
 			p:Hide(); action()
-            local child=AzerMindGuideSettings and AzerMindGuideSettings:IsShown() and AzerMindGuideSettings or AzerMindContextSettings and AzerMindContextSettings:IsShown() and AzerMindContextSettings or AzerMindNotificationSettings and AzerMindNotificationSettings:IsShown() and AzerMindNotificationSettings or AzerMindKeySettings
+            local child=AzerMindAppearanceSettings and AzerMindAppearanceSettings:IsShown() and AzerMindAppearanceSettings or AzerMindGuideSettings and AzerMindGuideSettings:IsShown() and AzerMindGuideSettings or AzerMindContextSettings and AzerMindContextSettings:IsShown() and AzerMindContextSettings or AzerMindNotificationSettings and AzerMindNotificationSettings:IsShown() and AzerMindNotificationSettings or AzerMindKeySettings
             if child then
                 if not child.parentBackHook then
                     child:HookScript("OnHide",function(self) if self.returnSettings and not self:IsShown() then self.returnSettings=false; panel:Show() end end)
@@ -53,6 +53,7 @@ function AzerMind.CodexPrompt(id)
 		Flat(side, "Character", 126, 10, -84, function() Navigate(AzerMind.ShowContextSettings) end)
         Flat(side,"Notifications",126,10,-120,function() Navigate(AzerMind.ShowNotificationSettings) end)
         Flat(side,"Key bindings",126,10,-156,function() Navigate(AzerMind.ShowKeySettings) end)
+        Flat(side,"Appearance",126,10,-192,function() Navigate(AzerMind.ShowAppearanceSettings) end)
 		Label(p, "AI Config", 180, -80, "GameFontNormalLarge")
 		Label(p, "Applies to", 180, -105)
 		p.scope = "conversation"
@@ -362,4 +363,35 @@ function AzerMind.ShowKeySettings()
   Button(p,"Close",100,436,-286,function() p:Hide() end)
  end
  p:Show()
+end
+
+local appearancePanel
+function AzerMind.ShowAppearanceSettings()
+ if not appearancePanel then
+  local p=CreateFrame("Frame","AzerMindAppearanceSettings",AzerMindFrame,"BackdropTemplate")
+  appearancePanel=p;p:SetSize(500,250);p:SetPoint("CENTER",AzerMindFrame,"CENTER")
+  p:SetFrameStrata("FULLSCREEN_DIALOG");p:SetFrameLevel(AzerMindFrame:GetFrameLevel()+100)
+  p:EnableMouse(true);Solid(p,"window");Theme.FitDialog(p)
+  table.insert(UISpecialFrames,"AzerMindAppearanceSettings")
+  Label(p,"Appearance",24,-24,"GameFontNormalLarge")
+  Label(p,"Addon opacity",24,-68)
+  Label(p,"Applies to the chat, mini bar and addon windows.",24,-94)
+  p.percent=Label(p,"",408,-68)
+  p.slider=CreateFrame("Slider","AzerMindOpacitySlider",p,"OptionsSliderTemplate")
+  p.slider:SetPoint("TOPLEFT",p,"TOPLEFT",32,-126);p.slider:SetSize(424,20)
+  p.slider:SetMinMaxValues(35,100);p.slider:SetValueStep(1)
+  for _,entry in ipairs({{"Low","35%"},{"High","100%"},{"Text",""}}) do
+   local label=_G["AzerMindOpacitySlider"..entry[1]]; if label then label:SetText(entry[2]) end
+  end
+  if p.slider.SetObeyStepOnDrag then p.slider:SetObeyStepOnDrag(true) end
+  p.slider:SetScript("OnValueChanged",function(_,value)
+   if p.loading then return end
+   value=math.floor(value+0.5);AzerMind.SetOpacity(value/100);p.percent:SetText(value.."%")
+  end)
+  Label(p,"Changes apply immediately and are saved.",24,-164)
+  Button(p,"Reset to 100%",140,180,-202,function() p.slider:SetValue(100) end)
+  Button(p,"Close",80,394,-202,function() p:Hide() end)
+ end
+ local p=appearancePanel;p.loading=true;p.slider:SetValue(AzerMind.GetOpacity()*100)
+ p.percent:SetText(math.floor(AzerMind.GetOpacity()*100+0.5).."%");p.loading=false;p:Show()
 end

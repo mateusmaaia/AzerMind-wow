@@ -222,6 +222,9 @@ local function InitDB()
 	db = AzerMindDB
 	db.settings = db.settings or {}
 	local s = db.settings
+	local opacity=tonumber(s.opacity)
+	s.opacity=(opacity and opacity==opacity) and math.max(0.35,math.min(1,opacity)) or 1
+	if AzerMindTheme then AzerMindTheme.ApplyOpacity(s.opacity) end
 	if s.autoRefresh == nil then s.autoRefresh = true end
 	if s.signal == nil then s.signal = true end
 	if s.contextMode ~= "full" and s.contextMode ~= "custom" then s.contextMode = "basic" end
@@ -582,7 +585,11 @@ function AzerMind.UpdateDot()
 	for _, dot in ipairs({ ui.dot, ui.miniDot }) do
 		if dot then
 			dot:SetTexture(STATE_ICON[state] or STATE_ICON.unknown)
-			dot.tip = tip
+			if AzerMindTheme and AzerMindTheme.grimoire then
+				local gem=state=="ok" and "connected" or (state=="stale" and "connecting" or "disconnected")
+				dot:SetTexture(AzerMindTheme.artRoot.."gem-"..gem..".tga")
+			end
+			dot.tip = tip .. (run.statusText and ("\n"..run.statusText) or "")
 		end
 	end
 end
@@ -652,6 +659,7 @@ function AzerMind.UpdateConnect()
 	local connected = AzerMind.IsConnected()
 	local active = ActiveChat()
 	ui.send:SetText(active and active.pendingId and "Stop" or "Send")
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.ActionIcon(ui.send,active and active.pendingId and "stop" or "send") end
 	ui.send:SetShown(connected)
 	ui.connect:SetShown(not connected)
 	if connected then return end
@@ -874,7 +882,8 @@ function AzerMind.UpdateLatency()
 	local function Value(v)
 		return type(v) == "number" and v >= 0 and v < math.huge and string.format("%.0f", v) or "--"
 	end
-	ui.latency:SetText("Home " .. Value(home) .. " / World " .. Value(world) .. " ms")
+	ui.latency:SetText(Value(world or home) .. " ms")
+	ui.latencyDetails = "Home " .. Value(home) .. " / World " .. Value(world) .. " ms"
 end
 
 local function Tick()
@@ -1319,7 +1328,7 @@ function AzerMind.SetContextMode(mode)
 	db.settings.contextFields = nil
 	db.settings.context = true
 	run.contextSent = nil
-	if ui.contextToggle then ui.contextToggle:SetText("Character context: " .. (mode == "full" and "Full" or "Basic")) end
+	if ui.contextToggle then ui.contextToggle:SetText("Context: " .. (mode == "full" and "Full" or "Basic")) end
 end
 
 -- Guide references are shared independently of character sharing.
@@ -2178,7 +2187,12 @@ function AzerMind.UpdateStatus()
 		s = "Ready"
 	end
 	if c and c.pendingId then s = AzerMind.PendingState(c) .. "..." end
-	ui.status:SetText(s)
+	local statusLabel=s
+	if not (c and c.pendingId) and not AzerMind.IsConnected() then
+		statusLabel=run.connectingAt and "Bridge connecting" or (AzerMind.BridgeState()=="stale" and "Bridge stale" or "Bridge offline")
+	end
+	ui.status:SetText(statusLabel)
+	ui.status:SetWidth(150)
 	run.statusText = s
 	AzerMind.UpdateDot()
 	AzerMind.UpdateConnect()
@@ -2186,7 +2200,7 @@ function AzerMind.UpdateStatus()
 		local t = c and Display(c.name) or "AzerMind"
 		ui.title:SetText(t)
 		if AzerMindTheme then AzerMindTheme.Color(ui.title, "SetTextColor", "text") end
-		ui.title:SetWidth(math.max(80, ui.frame:GetWidth() - 150))
+		if ui.layoutTitle then ui.layoutTitle() else ui.title:SetWidth(math.max(80,ui.frame:GetWidth()-150)) end
 		ui.title:SetWordWrap(false)
 	end
 	local cwdText
@@ -2259,7 +2273,8 @@ local function GetBubble(i)
 	b.body:SetWordWrap(true)
 	b.body:SetNonSpaceWrap(true)
 	if AzerMindTheme then AzerMindTheme.Type(b.body, "body") end
-	b.allow = CreateFrame("Button", nil, b, "UIPanelButtonTemplate")
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Type(b.body,"paperBody") end
+	b.allow = AzerMindTheme and AzerMindTheme.Button(b,"",160,22,nil) or CreateFrame("Button", nil, b, "UIPanelButtonTemplate")
 	b.allow:SetHeight(22)
 	b.allow:SetPoint("TOPLEFT", b.body, "BOTTOMLEFT", 0, -6)
 	b.allow:SetScript("OnClick", function(self)
@@ -2269,7 +2284,7 @@ local function GetBubble(i)
 	b.macroBtns = {}
 	local function Action(label, action)
 		local button = CreateFrame("Button", nil, b)
-		button:SetSize(28, 28); button:SetScript("OnClick", action)
+		button:SetSize(32, 32); button:SetScript("OnClick", action)
 		local function Stroke(x, y, w, h)
 			local t = button:CreateTexture(nil, "ARTWORK")
 			t:SetPoint("TOPLEFT", button, "TOPLEFT", x, -y); t:SetSize(w, h)
@@ -2288,6 +2303,16 @@ local function GetBubble(i)
 			Stroke(12, 3, 1, 5); Stroke(13, 4, 1, 3); Stroke(14, 5, 1, 1)
 		end
 		local glow = button:CreateTexture(nil, "HIGHLIGHT"); glow:SetAllPoints(); glow:SetColorTexture(1, 0.85, 0.5, 0.12)
+		if AzerMindTheme and AzerMindTheme.grimoire then
+			for _,region in ipairs({button:GetRegions()}) do if region~=glow then region:Hide() end end
+			local icon=AzerMindTheme.InkGlyph(button,label:lower())
+			button.actionIcon=icon; button.actionKind=label:lower()
+			button:HookScript("OnDisable",function() icon:SetAlpha(0.35) end)
+			button:HookScript("OnEnable",function() icon:SetAlpha(1) end)
+			button:HookScript("OnMouseDown",function() if button:IsEnabled() then icon:SetPoint("CENTER",button,"CENTER",1,-1) end end)
+			button:HookScript("OnMouseUp",function() icon:ClearAllPoints(); icon:SetPoint("CENTER",button,"CENTER",0,0) end)
+			button:HookScript("OnLeave",function() icon:ClearAllPoints(); icon:SetPoint("CENTER",button,"CENTER",0,0) end)
+		end
 		button:SetScript("OnEnter", function(self)
 			GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText(label, 0.91, 0.87, 0.78)
 			if label=="Delete" then GameTooltip:AddLine("Remove this message from local history. AI session memory is retained. Undo is available until the next deletion or UI reload.",1,1,1,true)
@@ -2310,10 +2335,36 @@ local function GetBubble(i)
 	b.delete = Action("Delete", function()
 		if b.entry then AzerMind.DeleteMessage(b.chatId,b.entry) end
 	end)
-	b.delete:SetPoint("TOPRIGHT", b, "TOPRIGHT", -6, -2)
-	b.resend:SetPoint("RIGHT", b.delete, "LEFT", -2, 0)
-	b.copy:SetPoint("RIGHT", b.resend, "LEFT", -2, 0)
+	b.delete:SetPoint("TOPRIGHT", b, "TOPRIGHT", -14, -10)
+	b.copy:SetPoint("RIGHT", b.delete, "LEFT", -6, 0)
+	b.resend:SetPoint("RIGHT", b.copy, "LEFT", -6, 0)
 	b.when:ClearAllPoints(); b.when:SetPoint("TOPRIGHT", b, "TOPRIGHT", -102, -6)
+	if AzerMindTheme and AzerMindTheme.grimoire then
+		-- Message cards share the leather reading surface; no ornamental frame.
+		b.separator=b:CreateTexture(nil,"BORDER")
+		b.separator:SetPoint("BOTTOMLEFT",b,"BOTTOMLEFT",14,0)
+		b.separator:SetPoint("BOTTOMRIGHT",b,"BOTTOMRIGHT",-14,0)
+		b.separator:SetHeight(1); b.separator:SetColorTexture(0.48,0.35,0.19,0.28)
+		b.avatar=b:CreateTexture(nil,"ARTWORK"); b.avatar:SetSize(32,32); b.avatar:SetPoint("TOPLEFT",b,"TOPLEFT",12,-8)
+		b.who:ClearAllPoints(); b.who:SetPoint("TOPLEFT",b,"TOPLEFT",48,-12)
+		AzerMindTheme.Type(b.who,"senderName")
+		b.provider=b:CreateFontString(nil,"OVERLAY"); AzerMindTheme.Type(b.provider,"label")
+		b.provider:SetPoint("LEFT",b.who,"RIGHT",6,0); b.provider:SetWordWrap(false)
+		AzerMindTheme.PaperFont(b.provider,true)
+		AzerMindTheme.MessageOutline(b)
+		b.body:ClearAllPoints(); b.body:SetPoint("TOPLEFT",b,"TOPLEFT",14,-54)
+		b.when:ClearAllPoints(); b.when:SetPoint("TOPLEFT",b.who,"BOTTOMLEFT",0,-3)
+		AzerMindTheme.Type(b.when,"timestamp"); b.when:SetJustifyH("LEFT")
+		b.attachment=AzerMindTheme.Button(b,"",200,32,function(self) AzerMind.ShowCopy(self.snapshot) end)
+		b.attachment.paper=true; AzerMindTheme.Selected(b.attachment,false)
+		b.attachment:SetPoint("TOPLEFT",b,"TOPLEFT",14,-54)
+		b.attachment.icon=b.attachment:CreateTexture(nil,"ARTWORK"); b.attachment.icon:SetSize(24,24)
+		b.attachment.icon:SetPoint("LEFT",b.attachment,"LEFT",8,0)
+		b.attachment.caption:ClearAllPoints(); b.attachment.caption:SetPoint("LEFT",b.attachment,"LEFT",40,0)
+		AzerMindTheme.Type(b.attachment.caption,"mainLabel"); AzerMindTheme.PaperFont(b.attachment.caption)
+		AzerMindTheme.Tooltip(b.attachment,function() return b.attachment:GetText() end,"Click to inspect the complete inventory snapshot.")
+		b.attachment:Hide()
+	end
 	b:SetScript("OnUpdate", function(self)
 		if self.activity then
 			local step = math.floor(GetTime() / 0.4) % 3 + 1
@@ -2331,13 +2382,13 @@ local function GetBubble(i)
 end
 
 function AzerMind.Render()
-	if ui.contextToggle then ui.contextToggle:SetText("Character context: " .. (not db.settings.context and "Off" or db.settings.contextMode == "full" and "Full" or db.settings.contextMode == "custom" and "Custom" or "Basic")) end
+	if ui.contextToggle then ui.contextToggle:SetText("Context: " .. (not db.settings.context and "Off" or db.settings.contextMode == "full" and "Full" or db.settings.contextMode == "custom" and "Custom" or "Basic")) end
 	local c = ActiveChat()
 	if ui.undoDelete then ui.undoDelete:SetShown(c and ui.deletedMessage and ui.deletedMessage.chat==c.id or false)
         if ui.listScroll then
             ui.listScroll:ClearAllPoints()
             ui.listScroll:SetPoint("TOPLEFT",ui.listNew,"BOTTOMLEFT",0,-30)
-            ui.listScroll:SetPoint("BOTTOMRIGHT",ui.listPanel,"BOTTOMRIGHT",-26,ui.undoDelete:IsShown() and 44 or 8)
+            ui.listScroll:SetPoint("BOTTOMRIGHT",ui.listPanel,"BOTTOMRIGHT",-40,ui.undoDelete:IsShown() and 44 or 8)
         end
     end
 	if ui.codexSettings and (not c or ui.codexSettings.chatId ~= c.id) then ui.codexSettings:Hide() end
@@ -2357,19 +2408,57 @@ function AzerMind.Render()
 			local st = ROLE_STYLE[role] or ROLE_STYLE.system
 			b:SetWidth(width)
 			b.bg:SetColorTexture(st.bg[1], st.bg[2], st.bg[3], st.bg[4])
+			if AzerMindTheme and AzerMindTheme.grimoire then
+				b.bg:SetColorTexture(0.60,0.40,0.20,role=="assistant" and 0.045 or 0)
+				b.accent:Hide()
+			end
 			b.accent:SetColorTexture(st.color[1], st.color[2], st.color[3], 0.9)
-			b.who:SetText(st == ROLE_STYLE.assistant and ReplyAgentName(c, agent) or st.label)
+			b.senderLabel=st==ROLE_STYLE.assistant and ("AzerMind - "..ReplyAgentName(c,agent)) or st.label
+			b.who:SetText(b.provider and st==ROLE_STYLE.assistant and "AzerMind" or b.senderLabel)
+			if b.provider then b.provider:SetText(st==ROLE_STYLE.assistant and ("- "..ReplyAgentName(c,agent)) or "");b.provider:SetShown(st==ROLE_STYLE.assistant) end
 			b.who:SetTextColor(st.color[1], st.color[2], st.color[3])
+			if AzerMindTheme and AzerMindTheme.grimoire then
+				b.who:SetTextColor(role=="assistant" and 0.40 or 0.40,role=="assistant" and 0.12 or 0.28,role=="assistant" and 0.20 or 0.12)
+			end
+			local senderSpace=math.max(40,width-190)
+			b.who:SetWordWrap(false); b.who:SetWidth(0)
+			b.who:SetWidth(math.min(senderSpace,math.max(1,b.who:GetStringWidth())))
+			if b.provider then b.provider:SetWidth(math.max(20,senderSpace-b.who:GetWidth()-6)) end
+			if b.avatar then b.avatar:SetTexture(AzerMindTheme.artRoot..(role=="assistant" and "emblem" or "icon-user")..".tga") end
 			b.when:SetText(when or "")
 			b.body:SetWidth(width - 18)
+			if AzerMindTheme and AzerMindTheme.grimoire then b.body:SetWidth(width-28) end
 			local rendered
-			if AzerMind.RichMessage then rendered, b.sources = AzerMind.RichMessage(role, text)
-			else rendered, b.sources = Display(AzerMind.MessageText(role, text)), nil end
+			local visible,attachment=text,nil
+			if AzerMindTheme and AzerMindTheme.grimoire and AzerMind.PresentMessage then visible,attachment=AzerMind.PresentMessage(role,text) end
+			local attachmentHeight=attachment and 40 or 0
+			if b.attachment then
+				b.attachment:SetShown(attachment~=nil)
+				b.body:ClearAllPoints(); b.body:SetPoint("TOPLEFT",b,"TOPLEFT",14,-54-attachmentHeight)
+				if attachment then
+					b.attachment.snapshot=attachment.full; b.attachment:SetText(attachment.label)
+					b.attachment.caption:SetWidth(width-80)
+					b.attachment:SetWidth(math.min(width-28,math.max(200,b.attachment.caption:GetStringWidth()+52)))
+					b.attachment.caption:SetWidth(b.attachment:GetWidth()-48)
+					local icon=AzerMindTheme.artRoot.."icon-items.tga"
+					local query=(C_Item and C_Item.GetItemInfo) or GetItemInfo
+					if attachment.id and query then local info={pcall(query,attachment.id)}; if info[1] and info[11] then icon=info[11] end end
+					b.attachment.icon:SetTexture(icon)
+				end
+			end
+			if AzerMind.RichMessage then rendered, b.sources = AzerMind.RichMessage(role, visible)
+			else rendered, b.sources = Display(AzerMind.MessageText(role, visible)), nil end
+			if AzerMindTheme and AzerMindTheme.grimoire then rendered=AzerMindTheme.PaperText(rendered) end
 			b.body:SetText(rendered)
 			if dim then
 				b.body:SetTextColor(0.72, 0.72, 0.72)
 			else
 				b.body:SetTextColor(0.93, 0.93, 0.93)
+			end
+			if AzerMindTheme and AzerMindTheme.grimoire then
+				AzerMindTheme.PaperFont(b.body,dim); AzerMindTheme.PaperFont(b.when,true)
+				b.who:SetShadowColor(0, 0, 0, 0)
+				-- Preserve the authored bronze, parchment and violet icon palette.
 			end
 			local h = b.body:GetStringHeight()
 			if not h or h < 1 then h = 14 end
@@ -2390,7 +2479,7 @@ function AzerMind.Render()
 			for k, m in ipairs(macros or {}) do
 				local mb = b.macroBtns[k]
 				if not mb then
-					mb = CreateFrame("Button", nil, b, "UIPanelButtonTemplate")
+					mb = AzerMindTheme and AzerMindTheme.Button(b,"",160,22,nil) or CreateFrame("Button", nil, b, "UIPanelButtonTemplate")
 					mb:SetHeight(22)
 					mb:SetScript("OnClick", function(self) AzerMind.InstallMacro(self.macro) end)
 					mb:SetScript("OnEnter", function(self)
@@ -2424,14 +2513,16 @@ function AzerMind.Render()
 			b.resend:SetEnabled(not c.pendingId or c.pendingId == messageId)
 			b.latest = not dim and n == #c.history
 			b.copy:SetShown(b.canCopy)
+			b.copy:ClearAllPoints(); b.copy:SetPoint("RIGHT",b.delete,"LEFT",-6,0)
 			b.resend:SetShown(b.canResend)
 			b.delete:SetShown(b.canCopy)
 			b:SetHeight(6 + 12 + 12 + h + 8 + extra)
+			if AzerMindTheme and AzerMindTheme.grimoire then b:SetHeight(68+h+extra+attachmentHeight) end
 			b:ClearAllPoints()
 			b:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, -y)
 			b.text = text
 			b:Show()
-			y = y + b:GetHeight() + 6
+			y = y + b:GetHeight() + 4
 		end
 		local last = #c.history
 		for i, m in ipairs(c.history) do
@@ -2457,7 +2548,6 @@ function AzerMind.Render()
 		C_Timer.After(0.05, function()
 			if ui.scroll and version==ui.renderVersion and db.activeChat==c.id then
 				ui.scroll:SetVerticalScroll(follow and ui.scroll:GetVerticalScrollRange() or math.min(oldScroll,ui.scroll:GetVerticalScrollRange()))
-				if ui.jumpLatest then ui.jumpLatest:SetShown(not follow) end
 			end
 		end)
 	end
@@ -2488,7 +2578,7 @@ function AzerMind.ShowCopy(text)
 		t:SetPoint("TOPLEFT", cf, "TOPLEFT", 14, -12)
 		t:SetText("Text is selected - press Ctrl+C, then Esc")
 
-		local x = CreateFrame("Button", nil, cf, "UIPanelCloseButton")
+		local x = AzerMindTheme and AzerMindTheme.Button(cf,"x",24,24,nil) or CreateFrame("Button", nil, cf, "UIPanelCloseButton")
 		x:SetPoint("TOPRIGHT", cf, "TOPRIGHT", -4, -4)
 
 		local sc = CreateFrame("ScrollFrame", "AzerMindCopyScroll", cf, "UIPanelScrollFrameTemplate")
@@ -2529,7 +2619,15 @@ function AzerMind.RenderChatList()
 			btn.label:SetText(label)
 			btn.chatId = c.id
 			btn.selected:SetShown(c.id == db.activeChat)
-			if btn.activeBar then btn.activeBar:SetShown(c.id == db.activeChat) end
+			if AzerMindTheme and AzerMindTheme.grimoire then
+				local selected=c.id==db.activeChat
+				local skin=AzerMindTheme.Frame(btn,selected and "conversation-selection" or "button-secondary",8)
+				for i,part in ipairs(skin.parts) do part:SetAlpha(i==5 and 1 or (selected and 0.65 or 0.22)) end
+				btn.selected:SetDrawLayer("ARTWORK",0)
+				btn.label:SetTextColor(0.91,0.87,0.78)
+				btn.del:Hide()
+			end
+			if btn.activeBar then btn.activeBar:SetDrawLayer("OVERLAY",1); btn.activeBar:SetShown(c.id == db.activeChat) end
 			btn:Show()
 		else
 			btn:Hide()
@@ -2767,7 +2865,11 @@ end
 ---------------------------------------------------------------------------
 
 local function MakeButton(parent, label, width, onClick, plain)
-	if AzerMindTheme then return AzerMindTheme.Button(parent, label, width, 22, onClick, nil, plain) end
+	if AzerMindTheme then
+		local button=AzerMindTheme.Button(parent,label,width,22,onClick,nil,plain)
+		if AzerMindTheme.grimoire then AzerMindTheme.Type(button.caption,"mainLabel") end
+		return button
+	end
 	local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
 	b:SetSize(width, 22)
 	b:SetText(label)
@@ -2790,6 +2892,18 @@ function AzerMind.SettingsState(id, agent)
 	local models = meta and meta.models or (selected == "codex" and run.codexModels or {}) or {}
 	return c, defaults, models, run.bridgeAgents or {"codex","claude","grok","agy","hermes"}, run.settingsPending,
 		meta or {model="",reasoning="",efforts=selected == "codex" and {"low","medium","high"} or {} }
+end
+
+function AzerMind.GetOpacity()
+ return db and db.settings.opacity or 1
+end
+function AzerMind.SetOpacity(value)
+ value=tonumber(value)
+ if not value or value~=value then return false end
+ value=math.max(0.35,math.min(1,value))
+ db.settings.opacity=value
+ if AzerMindTheme then AzerMindTheme.ApplyOpacity(value) end
+ return true
 end
 
 function AzerMind.AttachSettingsPanel(panel)
@@ -2855,9 +2969,9 @@ end
 local PANEL_W = 240
 
 local function WindowBounds()
-	local maxWidth = math.min(1200, UIParent:GetWidth() * 0.90)
-	local maxHeight = math.min(850, UIParent:GetHeight() * 0.90)
-	return math.min(640, maxWidth), math.min(380, maxHeight), maxWidth, maxHeight
+	local maxWidth = UIParent:GetWidth() * 0.95
+	local maxHeight = UIParent:GetHeight() * 0.95
+	return math.min(900, maxWidth), math.min(600, maxHeight), maxWidth, maxHeight
 end
 
 function AzerMind.ResetUI()
@@ -2880,6 +2994,7 @@ local function BuildUI()
 
 	local f = CreateFrame("Frame", "AzerMindFrame", UIParent, "BackdropTemplate")
 	ui.frame = f
+	if AzerMindTheme then AzerMindTheme.RegisterOpacity(f) end
 	local minW, minH, maxW, maxH = WindowBounds()
 	s.width, s.height = math.max(minW, math.min(s.width, maxW)), math.max(minH, math.min(s.height, maxH))
 	f:SetSize(s.width, s.height)
@@ -2888,7 +3003,7 @@ local function BuildUI()
 	else
 		f:SetPoint("CENTER")
 	end
-	f:SetFrameStrata("DIALOG")
+	if AzerMindTheme then AzerMindTheme.Window(f,"MEDIUM") else f:SetFrameStrata("MEDIUM"); f:SetToplevel(true) end
 	f:SetMovable(true)
 	f:SetResizable(true)
 	f:SetClampedToScreen(true)
@@ -2905,6 +3020,7 @@ local function BuildUI()
 	f:SetBackdropColor(0.055, 0.049, 0.039, 0.97)
 	if AzerMindTheme then AzerMindTheme.Glow(f, 0.24) end
 	f:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Panel(f,"frame-window",32) end
 	f:Hide()
 	tinsert(UISpecialFrames, "AzerMindFrame")
 
@@ -2919,6 +3035,7 @@ local function BuildUI()
 		holder:SetScript("OnEnter", function(self)
 			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 			GameTooltip:SetText(dot.tip or "Bridge status", 0.9, 0.9, 0.9, 1, true)
+			if ui.latencyDetails then GameTooltip:AddLine(ui.latencyDetails,0.8,0.8,0.8) end
 			GameTooltip:Show()
 		end)
 		holder:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2927,15 +3044,48 @@ local function BuildUI()
 
 	local dotHolder, dot = MakeDot(f)
 	dotHolder:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -16)
+	if AzerMindTheme and AzerMindTheme.grimoire then
+		local emblem = f:CreateTexture(nil, "ARTWORK")
+		emblem:SetSize(60,60); emblem:SetPoint("TOPLEFT", f, "TOPLEFT", 32, -28)
+		emblem:SetTexture(AzerMindTheme.artRoot .. "emblem.tga")
+		dotHolder:ClearAllPoints(); dotHolder:SetPoint("TOPLEFT", f, "TOPLEFT", 108, -52)
+		local brand = AzerMindTheme.Label(f, "AzerMind", 108, -28, "GameFontNormal")
+		AzerMindTheme.Type(brand,"brand")
+		brand:SetTextColor(0.90, 0.74, 0.39)
+	end
 	ui.dot = dot
 
 	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	if AzerMindTheme then AzerMindTheme.Type(title, "title") end
-	title:SetPoint("TOPLEFT", f, "TOPLEFT", PANEL_W + 22, -17)
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Type(title,"mainTitle") end
+	local titleBand=CreateFrame("Frame",nil,f)
+	titleBand:SetPoint("TOPLEFT",f,"TOPLEFT",PANEL_W+32,-21)
+	titleBand:SetPoint("TOPRIGHT",f,"TOPRIGHT",-210,-21); titleBand:SetHeight(44)
+	title:SetPoint("CENTER",titleBand,"CENTER",0,0)
+	local function LayoutTitle()
+		local width=math.max(80,titleBand:GetWidth()-96)
+		title:SetWidth(width); title:SetWidth(math.min(width,math.max(60,title:GetStringWidth())))
+	end
+	ui.layoutTitle=LayoutTitle; f:HookScript("OnSizeChanged",LayoutTitle)
+	if AzerMindTheme then AzerMindTheme.TitleOrnaments(titleBand,title); AzerMindTheme.Tooltip(titleBand,function() return title:GetText() end) end
+	titleBand:EnableMouse(true); titleBand:RegisterForDrag("LeftButton")
+	titleBand:SetScript("OnDragStart",function() f:StartMoving() end)
+	titleBand:SetScript("OnDragStop",function()
+		f:StopMovingOrSizing()
+		local point,_,relPoint,x,y=f:GetPoint(); s.point,s.relPoint,s.x,s.y=point,relPoint,x,y
+	end)
+	ui.titleBand=titleBand; LayoutTitle()
+	if AzerMindTheme then
+		local seam=CreateFrame("Frame",nil,f); seam:SetPoint("TOPLEFT",f,"TOPLEFT",28,-16)
+		seam:SetPoint("TOPRIGHT",f,"TOPRIGHT",-28,-16); seam:SetHeight(76)
+		AzerMindTheme.Stitches(seam,0,true)
+	end
+	title:SetWordWrap(false); title:SetJustifyH("CENTER")
 	title:SetText("AzerMind")
 	ui.title = title
+	ui.titleHorizontalInset = PANEL_W + 232
 	local latency = f:CreateFontString("AzerMindLatency", "OVERLAY", "GameFontHighlightSmall")
-	latency:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -37)
+	-- Network latency gets a separate row below bridge status.
 	latency:SetTextColor(0.55, 0.55, 0.52, 1)
 	latency:SetWordWrap(false)
 	ui.latency = latency
@@ -2944,15 +3094,25 @@ local function BuildUI()
 	local status = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	status:SetPoint("LEFT", dotHolder, "RIGHT", 4, 0)
 	status:SetWidth(PANEL_W - 24)
+	if AzerMindTheme and AzerMindTheme.grimoire then status:SetWidth(PANEL_W - 90) end
 	status:SetWordWrap(false)
 	status:SetJustifyH("LEFT")
 	ui.status = status
+	local latencyIcon=CreateFrame("Frame","AzerMindLatencyIcon",f)
+	latencyIcon:SetSize(12,12); latencyIcon:SetPoint("TOPLEFT",f,"TOPLEFT",110,-70)
+	for i=0,2 do
+		local bar=latencyIcon:CreateTexture(nil,"ARTWORK")
+		bar:SetSize(2,3+i*3); bar:SetPoint("BOTTOMLEFT",latencyIcon,"BOTTOMLEFT",i*4,1)
+		bar:SetColorTexture(0.70,0.60,0.40,1)
+	end
+	latency:SetPoint("LEFT",latencyIcon,"RIGHT",6,0)
+	latency:SetWidth(76); latency:SetJustifyH("LEFT")
 
 	-- Minimize button in the corner where a close X would be: this window is never
 	-- closed from here, only collapsed to the mini bar (Esc does the same, see OnHide).
 	-- The mini bar's own X is the one that hides everything.
 	local mini
-	if C_Texture and C_Texture.GetAtlasExists and C_Texture.GetAtlasExists("RedButton-MiniCondense") then
+	if not (AzerMindTheme and AzerMindTheme.grimoire) and C_Texture and C_Texture.GetAtlasExists and C_Texture.GetAtlasExists("RedButton-MiniCondense") then
 		local ok, b = pcall(CreateFrame, "Button", nil, f, "UIPanelHideButtonNoScripts")
 		if ok and b then mini = b end
 	end
@@ -2960,6 +3120,7 @@ local function BuildUI()
 		mini = CreateFrame("Button", nil, f)
 		mini:SetSize(24, 24)
 		local dash = mini:CreateTexture(nil, "ARTWORK")
+		dash:SetDrawLayer("OVERLAY",7)
 		dash:SetSize(10, 2)
 		dash:SetPoint("CENTER", mini, "CENTER", 0, -3)
 		dash:SetColorTexture(0.9, 0.9, 0.9, 1)
@@ -2967,7 +3128,9 @@ local function BuildUI()
 		hl:SetAllPoints()
 		hl:SetColorTexture(1, 1, 1, 0.15)
 	end
-	mini:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+	mini:SetSize(30,30)
+	mini:SetPoint("TOPRIGHT", f, "TOPRIGHT", -32, -28)
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Frame(mini,"button-secondary",6) end
 	mini:SetScript("OnClick", function() AzerMind.Minimize(true) end)
 	mini:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
@@ -2993,8 +3156,8 @@ local function BuildUI()
 
 	-- Left panel: chat list
 	local panel = CreateFrame("Frame", nil, f, "BackdropTemplate")
-	panel:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -52)
-	panel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 18)
+	panel:SetPoint("TOPLEFT", f, "TOPLEFT", 24, -100)
+	panel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 24, 30)
 	panel:SetWidth(PANEL_W)
 	panel:SetBackdrop({
 		bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
@@ -3005,21 +3168,25 @@ local function BuildUI()
 	panel:SetBackdropColor(0.055, 0.049, 0.039, 1)
 	if AzerMindTheme then AzerMindTheme.Surface(panel, "panel") end
 	panel:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Panel(panel,"frame-panel",10); AzerMindTheme.Stitches(panel,6) end
 
 	local newBtn = MakeButton(panel, "+ New chat", PANEL_W - 16, function() AzerMind.NewChat() end)
 	newBtn:SetPoint("TOP", panel, "TOP", 0, -8)
-	newBtn:SetHeight(30)
+	newBtn:SetHeight(36)
+	if AzerMindTheme and AzerMindTheme.grimoire then newBtn.paper=true; AzerMindTheme.Selected(newBtn,false); AzerMindTheme.Type(newBtn.caption,"paperHeading") end
 	local listTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	listTitle:SetPoint("TOPLEFT", newBtn, "BOTTOMLEFT", 4, -12)
 	listTitle:SetText("CONVERSATIONS")
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Type(listTitle,"mainLabel"); listTitle:SetTextColor(0.90,0.74,0.39) end
 	local listScroll = CreateFrame("ScrollFrame", "AzerMindConversationScroll", panel, "UIPanelScrollFrameTemplate")
 	listScroll:SetPoint("TOPLEFT", newBtn, "BOTTOMLEFT", 0, -30)
-	listScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -26, 8)
+	listScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -40, 8)
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Scrollbar(listScroll) end
     ui.listScroll=listScroll; ui.listNew=newBtn; ui.listPanel=panel
 	ui.undoDelete=MakeButton(panel,"Undo deletion",PANEL_W-16,AzerMind.UndoMessageDeletion)
 	ui.undoDelete:SetPoint("BOTTOM",panel,"BOTTOM",0,8); ui.undoDelete:Hide()
 	local listContent = CreateFrame("Frame", nil, listScroll)
-	listContent:SetSize(PANEL_W - 34, MAX_CHATS * 34)
+	listContent:SetSize(PANEL_W - 54, MAX_CHATS * 34)
 	listScroll:SetScrollChild(listContent)
 	ui.chatListContent = listContent
 
@@ -3037,6 +3204,7 @@ local function BuildUI()
 	})
 	menu:SetBackdropColor(0.085, 0.075, 0.058, 1)
 	menu:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Material(menu,"leather"); AzerMindTheme.Panel(menu,"frame-popup",8) end
 	menu:EnableMouse(true)
 	menu.title = menu:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	menu.title:SetPoint("TOPLEFT", menu, "TOPLEFT", 10, -8)
@@ -3069,6 +3237,7 @@ local function BuildUI()
 		AzerMind.Render()
 	end)
 	local codexItem = MenuItem("AI settings...", 5, AzerMind.CodexPrompt)
+	MenuItem("Delete conversation...",7,AzerMind.ConfirmDelete)
 	MenuItem("Reset AI session",6,function(id)
 		local chat=FindChat(id)
 		if not chat then return end
@@ -3098,7 +3267,7 @@ local function BuildUI()
 		end
 		menu.chatId = chatId
 		codexItem:Show()
-		menu:SetSize(180, 7 * 24 + 12)
+		menu:SetSize(180, 8 * 24 + 12)
 		menu.owner = anchor
 		menu.away = 0
 		menu.title:SetText(Display(c.name))
@@ -3110,18 +3279,22 @@ local function BuildUI()
 	ui.chatButtons = {}
 	for i = 1, MAX_CHATS do
 		local b = CreateFrame("Button", nil, listContent)
-		b:SetSize(PANEL_W - 34, 30)
+		b:SetSize(PANEL_W - 54, 32)
 		b:SetPoint("TOPLEFT", listContent, "TOPLEFT", 0, -(i - 1) * 34)
+		if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Material(b,"leather",0) end
 		b.selected = b:CreateTexture(nil, "BACKGROUND")
 		b.selected:SetAllPoints()
 		b.selected:SetColorTexture(0.12, 0.24, 0.23, 1)
+		if AzerMindTheme and AzerMindTheme.grimoire then b.selected:SetColorTexture(0.29,0.07,0.08,1) end
 		b.selected:Hide()
 		b.activeBar = b:CreateTexture(nil, "BORDER")
 		b.activeBar:SetPoint("TOPLEFT"); b.activeBar:SetPoint("BOTTOMLEFT"); b.activeBar:SetWidth(2)
 		b.activeBar:SetColorTexture(0.60, 0.90, 0.95, 1); b.activeBar:Hide()
+		if AzerMindTheme and AzerMindTheme.grimoire then b.activeBar:SetColorTexture(0.90,0.74,0.39,1) end
 		local hl = b:CreateTexture(nil, "HIGHLIGHT")
 		hl:SetAllPoints()
 		hl:SetColorTexture(0.60, 0.90, 0.95, 0.08)
+		if AzerMindTheme and AzerMindTheme.grimoire then hl:SetColorTexture(0.94,0.80,0.52,0.12) end
 
 		-- Trash can: delete this chat (asks first). Blizzard's red delete button
 		-- where the client has it, a plain X elsewhere.
@@ -3129,8 +3302,20 @@ local function BuildUI()
 		if AzerMindTheme then AzerMindTheme.Icon(b.del,"delete",4,-4) else b.del:SetText("Delete") end
 		b.del:SetSize(24, 24)
 		b.del:SetPoint("RIGHT", b, "RIGHT", -3, 0)
-		b.menu=MakeButton(b,"...",24,function() AzerMind.ShowChatMenu(b.chatId,b) end)
-		b.menu:SetPoint("RIGHT",b.del,"LEFT",-2,0)
+		b.menu=MakeButton(b,"...",20,function() AzerMind.ShowChatMenu(b.chatId,b) end)
+		b.menu:SetPoint("RIGHT",b,"RIGHT",-6,0)
+		if AzerMindTheme and AzerMindTheme.grimoire then
+			b.menu.caption:SetText("")
+			b.menu.fill:SetAlpha(0)
+			b.menu.dots={}
+			for offset=-5,5,5 do
+				local dot=b.menu:CreateTexture(nil,"OVERLAY",nil,7)
+				dot:SetSize(3,3); dot:SetPoint("CENTER",b.menu,"CENTER",0,offset)
+				dot:SetColorTexture(0.78,0.66,0.43,1)
+				b.menu.dots[#b.menu.dots+1]=dot
+			end
+			for _,part in ipairs(b.menu.grimoireFrame.parts) do part:SetAlpha(0) end
+		end
 		if AzerMindTheme then AzerMindTheme.Tooltip(b.menu,"Conversation actions","Rename, folder, agent, local history and AI settings.") end
 		b.del:SetAlpha(1)
 		b.del:SetScript("OnClick", function() AzerMind.ConfirmDelete(b.chatId) end)
@@ -3176,14 +3361,16 @@ local function BuildUI()
 	end
 
 	-- Transcript: a scrolling stack of message bubbles
+	local reading=CreateFrame("Frame","AzerMindReadingPanel",f,"BackdropTemplate")
+	if AzerMindTheme then AzerMindTheme.Material(reading,"parchment",4); AzerMindTheme.Panel(reading,"frame-input",10); AzerMindTheme.PaperBevel(reading) end
 	local scroll = CreateFrame("ScrollFrame", "AzerMindScroll", f, "UIPanelScrollFrameTemplate")
-	scroll:SetPoint("TOPLEFT", panel, "TOPRIGHT", 8, 0)
-	scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -32, 188)
+	reading:SetPoint("TOPLEFT",scroll,"TOPLEFT",-8,8)
+	reading:SetPoint("BOTTOMRIGHT",scroll,"BOTTOMRIGHT",36,-8)
+	scroll:SetPoint("TOPLEFT", panel, "TOPRIGHT", 16, -8)
+	scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -62, 188)
 	ui.scroll = scroll
-	ui.jumpLatest=MakeButton(f,"Jump to latest",140,function()
-		scroll:SetVerticalScroll(scroll:GetVerticalScrollRange()); ui.jumpLatest:Hide()
-	end)
-	ui.jumpLatest:SetPoint("BOTTOMRIGHT",scroll,"BOTTOMRIGHT",-8,4); ui.jumpLatest:Hide()
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Scrollbar(scroll) end
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Material(scroll, "parchment", 0) end
 
 	local content = CreateFrame("Frame", "AzerMindContent", scroll)
 	content:SetSize(500, 1)
@@ -3195,11 +3382,11 @@ local function BuildUI()
 	end)
 
 	-- Input box, with Send docked at its right end like a messaging app.
-	local SEND_W = 84
+	local SEND_W = 140
 	local inputBg = CreateFrame("Frame", nil, f, "BackdropTemplate")
-	inputBg:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", PANEL_W + 22, 18)
-	inputBg:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14 - SEND_W - 6, 18)
-	inputBg:SetHeight(130)
+	inputBg:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", PANEL_W + 32, 30)
+	inputBg:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -32 - SEND_W - 12, 30)
+	inputBg:SetHeight(112)
 	inputBg:SetBackdrop({
 		bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
 		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -3208,10 +3395,28 @@ local function BuildUI()
 	})
 	inputBg:SetBackdropColor(0, 0, 0, 0.6)
 	inputBg:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+	if AzerMindTheme and AzerMindTheme.grimoire then
+		AzerMindTheme.Material(inputBg, "parchment")
+		inputBg:SetBackdropBorderColor(0.65, 0.48, 0.25, 1)
+		AzerMindTheme.Panel(inputBg,"frame-input",8); AzerMindTheme.PaperBevel(inputBg)
+	end
 
 	local inScroll = CreateFrame("ScrollFrame", "AzerMindInputScroll", inputBg, "UIPanelScrollFrameTemplate")
 	inScroll:SetPoint("TOPLEFT", inputBg, "TOPLEFT", 8, -6)
 	inScroll:SetPoint("BOTTOMRIGHT", inputBg, "BOTTOMRIGHT", -24, 6)
+	if AzerMindTheme and AzerMindTheme.grimoire then
+		inScroll:ClearAllPoints(); inScroll:SetPoint("TOPLEFT",inputBg,"TOPLEFT",12,-10)
+		inScroll:SetPoint("BOTTOMRIGHT",inputBg,"BOTTOMRIGHT",-40,36)
+	end
+	if AzerMindTheme and AzerMindTheme.grimoire then
+		AzerMindTheme.Scrollbar(inScroll)
+		local bar=inScroll.ScrollBar or _G["AzerMindInputScrollScrollBar"]
+		if bar then
+			bar:ClearAllPoints()
+			bar:SetPoint("TOPRIGHT",inputBg,"TOPRIGHT",-12,-30)
+			bar:SetPoint("BOTTOMRIGHT",inputBg,"BOTTOMRIGHT",-12,30)
+		end
+	end
 
 	local input = CreateFrame("EditBox", "AzerMindInput", inScroll)
 	input:SetMultiLine(true)
@@ -3222,6 +3427,12 @@ local function BuildUI()
 	input:SetAutoFocus(false)
 	input:SetFontObject(ChatFontNormal)
 	if AzerMindTheme then AzerMindTheme.Type(input, "body") end
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Type(input,"paperBody"); AzerMindTheme.PaperFont(input) end
+	if AzerMindTheme and AzerMindTheme.grimoire then
+		input:HookScript("OnEditFocusGained",function() AzerMindTheme.Focus(inputBg,true) end)
+		input:HookScript("OnEditFocusLost",function() AzerMindTheme.Focus(inputBg,false) end)
+		AzerMindTheme.Focus(inputBg,false)
+	end
 	input:SetMaxLetters(0)
 	input:SetSize(500, 116)
 	input:SetScript("OnEnterPressed", function(self)
@@ -3233,8 +3444,19 @@ local function BuildUI()
 		input:SetWidth(w)
 	end)
 	inputBg:SetScript("OnMouseDown", function() input:SetFocus() end)
+	if AzerMindTheme and AzerMindTheme.grimoire then
+		inputBg.placeholder=AzerMindTheme.Label(inputBg,"Write your message...",14,-12)
+		AzerMindTheme.Type(inputBg.placeholder,"paperBody"); AzerMindTheme.PaperFont(inputBg.placeholder,true)
+		inputBg.hint=inputBg:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+		inputBg.hint:SetPoint("BOTTOMLEFT",inputBg,"BOTTOMLEFT",16,16)
+		inputBg.hint:SetPoint("BOTTOMRIGHT",inputBg,"BOTTOMRIGHT",-34,16)
+		inputBg.hint:SetJustifyH("LEFT"); inputBg.hint:SetWordWrap(false)
+		AzerMindTheme.Type(inputBg.hint,"label")
+		inputBg.hint:SetText("Enter to send - Shift+Enter for new line"); AzerMindTheme.PaperFont(inputBg.hint,true)
+		input:HookScript("OnTextChanged",function(self) inputBg.placeholder:SetShown((self:GetText() or "")=="") end)
+	end
 	ui.input = input
-	local equipment = MakeButton(f, "Items", 80, function() if AzerMind.ShowItemPicker then AzerMind.ShowItemPicker() end end)
+	local equipment = MakeButton(f, "Items", 96, function() if AzerMind.ShowItemPicker then AzerMind.ShowItemPicker() end end)
 	equipment:SetPoint("BOTTOMLEFT", inputBg, "TOPLEFT", 0, 6)
 	equipment:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -3243,14 +3465,14 @@ local function BuildUI()
 		GameTooltip:Show()
 	end)
 	equipment:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	local quests = MakeButton(f, "Quests", 88, function() if AzerMind.ShowQuestPicker then AzerMind.ShowQuestPicker() end end)
+	local quests = MakeButton(f, "Quests", 104, function() if AzerMind.ShowQuestPicker then AzerMind.ShowQuestPicker() end end)
 	quests:SetPoint("LEFT", equipment, "RIGHT", 8, 0)
 	quests:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText("Attach quests", 0.91, 0.87, 0.78)
 		GameTooltip:AddLine("Browse your quest log or the quest database. Select quests to add to your message. Nothing is sent yet.", 0.75, 0.75, 0.75, true); GameTooltip:Show()
 	end)
 	quests:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	ui.contextToggle = MakeButton(f, "Character context: " .. (db.settings.contextMode == "full" and "Full" or db.settings.contextMode == "custom" and "Custom" or "Basic"), 230, function()
+	ui.contextToggle = MakeButton(f, "Context: " .. (db.settings.contextMode == "full" and "Full" or db.settings.contextMode == "custom" and "Custom" or "Basic"), 172, function()
 		AzerMind.ShowContextSettings()
 	end)
 	ui.contextToggle:SetPoint("LEFT", quests, "RIGHT", 8, 0)
@@ -3259,33 +3481,47 @@ local function BuildUI()
 		GameTooltip:AddLine("Choose which character data to share. Applies to future messages in every conversation. Open to customize or preview.", 0.75, 0.75, 0.75, true); GameTooltip:Show()
 	end)
 	ui.contextToggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	local instancesButton=MakeButton(f,"Dungeons & Raids",198,function() AzerMind.ShowInstancePicker() end)
+	local instancesButton=MakeButton(f,"Dungeons & Raids",184,function() AzerMind.ShowInstancePicker() end)
 	if AzerMindTheme then
 		AzerMindTheme.IconLabel(equipment,"items"); AzerMindTheme.IconLabel(quests,"quests")
 		AzerMindTheme.IconLabel(instancesButton,"instances"); AzerMindTheme.IconLabel(ui.contextToggle,"character")
 	end
-	for _,button in ipairs({equipment,quests,instancesButton,ui.contextToggle}) do button:SetHeight(28) end
+	for _,button in ipairs({equipment,quests,instancesButton,ui.contextToggle}) do
+		button:SetHeight(32); if AzerMindTheme then AzerMindTheme.Type(button.caption,"toolbarLabel") end
+	end
 	local function LayoutComposerActions()
-		local available=f:GetWidth()-PANEL_W-36
+		local available=f:GetWidth()-PANEL_W-64
 		local buttons={equipment,quests,instancesButton,ui.contextToggle}
 		for _,button in ipairs(buttons) do button:ClearAllPoints() end
 		equipment:SetPoint("BOTTOMLEFT",inputBg,"TOPLEFT",0,6)
 		quests:SetPoint("LEFT",equipment,"RIGHT",8,0)
 		instancesButton:SetPoint("LEFT",quests,"RIGHT",8,0)
-		local twoRows=available<636
+		local twoRows=available<584
 		if twoRows then ui.contextToggle:SetPoint("BOTTOMLEFT",equipment,"TOPLEFT",0,6)
-		else ui.contextToggle:SetPoint("LEFT",instancesButton,"RIGHT",24,0) end
+		else ui.contextToggle:SetPoint("LEFT",instancesButton,"RIGHT",12,0) end
 		scroll:ClearAllPoints()
-		scroll:SetPoint("TOPLEFT",panel,"TOPRIGHT",8,0)
-		scroll:SetPoint("BOTTOMRIGHT",f,"BOTTOMRIGHT",-32,twoRows and 220 or 188)
+		scroll:SetPoint("TOPLEFT",panel,"TOPRIGHT",16,-8)
+		scroll:SetPoint("BOTTOMRIGHT",f,"BOTTOMRIGHT",-62,inputBg:GetHeight()+30+(twoRows and 88 or 54))
 	end
-	f:HookScript("OnSizeChanged",LayoutComposerActions)
-	LayoutComposerActions()
+	local measure=inputBg:CreateFontString(nil,"BACKGROUND")
+	if AzerMindTheme then AzerMindTheme.Type(measure,"paperBody") else measure:SetFontObject(ChatFontNormal) end
+	measure:SetWordWrap(true); measure:Hide()
+	inputBg.draftMeasure=measure
+	local function FitDraft()
+		measure:SetWidth(math.max(80,inScroll:GetWidth()))
+		measure:SetText((input:GetText() or "").." ")
+		local height=math.max(112,math.min(180,f:GetHeight()*0.30,measure:GetStringHeight()+48))
+		if inputBg:GetHeight()~=height then inputBg:SetHeight(height) end
+		LayoutComposerActions()
+	end
+	input:HookScript("OnTextChanged",FitDraft)
+	f:HookScript("OnSizeChanged",FitDraft)
+	FitDraft()
 
 
 	local clearDraft = MakeButton(f, "Clear draft", SEND_W, AzerMind.ClearDraft)
-	clearDraft:SetHeight(28)
-	clearDraft:SetPoint("BOTTOMLEFT", inputBg, "BOTTOMRIGHT", 6, 0)
+	clearDraft:SetHeight(30)
+	clearDraft:SetPoint("BOTTOMLEFT", inputBg, "BOTTOMRIGHT", 12, 0)
 	clearDraft:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:SetText("Clear draft", 0.91, 0.87, 0.78)
@@ -3299,13 +3535,16 @@ local function BuildUI()
 		local c = ActiveChat()
 		if c and c.pendingId then AzerMind.CancelPending() else AzerMind.SendFromInput() end
 	end, true)
-	send:SetPoint("TOPLEFT", inputBg, "TOPRIGHT", 6, 0)
+	send:SetPoint("TOPLEFT", inputBg, "TOPRIGHT", 12, 0)
+	send.subdued=true
 	send:SetPoint("BOTTOMLEFT", clearDraft, "TOPLEFT", 0, 8)
 	ui.send = send
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.ActionIcon(send,"send") end
 
 	-- Connect stands in for Send until the bridge has been seen (see UpdateConnect).
 	local connect = MakeButton(f, "Connect", SEND_W, AzerMind.Connect, true)
-	connect:SetPoint("TOPLEFT", inputBg, "TOPRIGHT", 6, 0)
+	connect:SetPoint("TOPLEFT", inputBg, "TOPRIGHT", 12, 0)
+	connect.subdued=false
 	connect:SetPoint("BOTTOMLEFT", clearDraft, "TOPLEFT", 0, 8)
 	connect:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -3316,6 +3555,7 @@ local function BuildUI()
 	connect:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	connect:Hide()
 	ui.connect = connect
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.ActionIcon(connect,"connect") end
 
 	-- Reload is the fallback transport's button; it sits apart on the right and
 	-- only shows when a reload would do something (see UpdateStatus).
@@ -3326,8 +3566,10 @@ local function BuildUI()
 
 	-- Resend is attached to the pending user message; no footer action row.
 
-	local codexButton = MakeButton(f, "Config", 62, function() AzerMind.CodexPrompt() end)
-	codexButton:SetPoint("RIGHT", mini, "LEFT", -4, 0)
+	local codexButton = MakeButton(f, "Config", 124, function() AzerMind.CodexPrompt() end)
+	codexButton:SetHeight(30)
+	if AzerMindTheme then AzerMindTheme.IconLabel(codexButton,"settings") end
+	codexButton:SetPoint("RIGHT", mini, "LEFT", -12, 0)
 	codexButton:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 		GameTooltip:SetText("AI settings", 0.91, 0.87, 0.78)
@@ -3372,6 +3614,10 @@ local function BuildUI()
 	grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
 	grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
 	grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+	if AzerMindTheme and AzerMindTheme.grimoire then
+		grip:SetNormalTexture(AzerMindTheme.artRoot.."resize-grip.tga")
+		grip:SetPushedTexture(AzerMindTheme.artRoot.."resize-grip.tga")
+	end
 	grip:SetScript("OnMouseDown", function(_, button) if button == "LeftButton" then f:StartSizing("BOTTOMRIGHT") end end)
 	grip:SetScript("OnMouseUp", function()
 		f:StopMovingOrSizing()
@@ -3381,13 +3627,14 @@ local function BuildUI()
 	-- Mini bar: what the window collapses into. Click it to expand, drag to move.
 	local m = CreateFrame("Frame", "AzerMindMini", UIParent, "BackdropTemplate")
 	ui.mini = m
+	if AzerMindTheme then AzerMindTheme.RegisterOpacity(m) end
 	m:SetSize(250, 30)
 	if s.miniPoint then
 		m:SetPoint(s.miniPoint, UIParent, s.miniRelPoint or s.miniPoint, s.miniX or 0, s.miniY or 0)
 	else
 		m:SetPoint("TOP", UIParent, "TOP", 0, -40)
 	end
-	m:SetFrameStrata("DIALOG")
+	if AzerMindTheme then AzerMindTheme.Window(m,"MEDIUM") else m:SetFrameStrata("MEDIUM"); m:SetToplevel(true) end
 	m:SetMovable(true)
 	m:SetClampedToScreen(true)
 	m:EnableMouse(true)
@@ -3411,6 +3658,7 @@ local function BuildUI()
 	m:SetBackdropColor(0.055, 0.049, 0.039, 0.97)
 	if AzerMindTheme then AzerMindTheme.Glow(m, 0.16) end
 	m:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+	if AzerMindTheme and AzerMindTheme.grimoire then AzerMindTheme.Panel(m,"frame-window",8) end
 	m:Hide()
 
 	local miniDotHolder, miniDot = MakeDot(m)
@@ -3445,7 +3693,7 @@ local function BuildUI()
 	end)
 	if ok then ui.miniPulse = pulse end
 
-	local mclose = CreateFrame("Button", nil, m, "UIPanelCloseButton")
+	local mclose = AzerMindTheme and AzerMindTheme.Button(m,"x",24,24,nil) or CreateFrame("Button", nil, m, "UIPanelCloseButton")
 	mclose:SetSize(24, 24)
 	mclose:SetPoint("RIGHT", m, "RIGHT", -2, 0)
 	mclose:SetScript("OnClick", function() AzerMind.Toggle(false) end)

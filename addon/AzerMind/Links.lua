@@ -76,11 +76,43 @@ function AzerMind.RichMessage(role, text)
 		end)
 	end
 	plain = plain:gsub("\1(%d+)\2", function(index) return links[tonumber(index)] or "" end)
-	return plain:gsub("\3", "|cff8fc9df|Hazermindsources:1|h[Sources]|h|r"), sources
+	return plain:gsub("\3", ("|cff8fc9df|Hazermindsources:1|hSources (" .. #sources .. ")|h|r")), sources
 end
 
 function AzerMind.CopyMessage(role, text)
 	return (AzerMind.MessageText(role, text):gsub("%[%[%a+:%d+:([^%]]+)%]%]", "[%1]"))
+end
+
+-- Presentation only. Transport, saved history and copy keep the full snapshot.
+function AzerMind.PresentMessage(role, text)
+	if role~="user" or type(text)~="string" then return text end
+	local visible,items,blocks=text,{},{}
+	local first="--- Selected inventory items ---"
+	local last="--- End selected inventory items ---"
+	while true do
+		local start=visible:find(first,1,true)
+		local finish=start and visible:find(last,start+#first,true)
+		if not finish then break end
+		local block=visible:sub(start,finish+#last-1)
+		local found={}
+		for line in block:gmatch("[^\n]+") do
+			local plain=AzerMind.PlainText(line)
+			local location,name,tail=plain:match("^([^:]+):%s*%[([^%]]+)%](.*)$")
+			if location and ({Equipped=true,Bags=true,Bank=true,Catalog=true})[location] then
+				local count=tail:match("×%s*(%d+)") or tail:match("[xX]%s*(%d+)") or "1"
+				found[#found+1]={name=name,count=count,location=location,id=tonumber(line:match("|Hitem:(%d+)"))}
+			end
+		end
+		if #found==0 then break end
+		for _,item in ipairs(found) do items[#items+1]=item end
+		blocks[#blocks+1]=block
+		visible=visible:sub(1,start-1)..visible:sub(finish+#last)
+	end
+	if #items==0 then return text end
+	local item=items[1]
+	local label=item.name.." ×"..item.count.." · "..item.location
+	if #items>1 then label=label.."  +"..(#items-1).." items" end
+	return visible:gsub("^%s+",""):gsub("%s+$",""),{label=label,count=#items,id=item.id,full=table.concat(blocks,"\n\n")}
 end
 
 function AzerMind.OpenAcceptedQuest(id)

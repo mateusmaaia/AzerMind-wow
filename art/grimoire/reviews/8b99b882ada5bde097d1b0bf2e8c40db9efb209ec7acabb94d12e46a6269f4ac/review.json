@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "status": "pending",
+  "fingerprint": "8b99b882ada5bde097d1b0bf2e8c40db9efb209ec7acabb94d12e46a6269f4ac",
+  "source": "wow-client",
+  "reviewer": "",
+  "reviewedAt": "",
+  "clientVersion": "",
+  "limitations": "Screenshots and checklist require a human review in the WoW client; code tests cannot approve appearance.",
+  "captures": [
+    {
+      "width": 900,
+      "height": 600,
+      "state": "disconnected",
+      "file": "",
+      "sha256": ""
+    },
+    {
+      "width": 900,
+      "height": 600,
+      "state": "connected",
+      "file": "",
+      "sha256": ""
+    },
+    {
+      "width": 900,
+      "height": 600,
+      "state": "responding",
+      "file": "",
+      "sha256": ""
+    },
+    {
+      "width": 1180,
+      "height": 830,
+      "state": "disconnected",
+      "file": "",
+      "sha256": ""
+    },
+    {
+      "width": 1180,
+      "height": 830,
+      "state": "connected",
+      "file": "",
+      "sha256": ""
+    },
+    {
+      "width": 1180,
+      "height": 830,
+      "state": "responding",
+      "file": "",
+      "sha256": ""
+    },
+    {
+      "width": 1600,
+      "height": 1000,
+      "state": "disconnected",
+      "file": "",
+      "sha256": ""
+    },
+    {
+      "width": 1600,
+      "height": 1000,
+      "state": "connected",
+      "file": "",
+      "sha256": ""
+    },
+    {
+      "width": 1600,
+      "height": 1000,
+      "state": "responding",
+      "file": "",
+      "sha256": ""
+    }
+  ],
+  "interactions": {
+    "copy": false,
+    "resend": false,
+    "delete-and-undo": false,
+    "config": false,
+    "scroll-all-three": false,
+    "resize": false,
+    "minimize-restore": false,
+    "opacity": false,
+    "send-stop": false
+  }
+}

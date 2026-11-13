@@ -1,0 +1,49 @@
+{
+  "theme": "Archivist Grimoire",
+  "note": "Art provenance, not native-client approval. Materials and controls are integrated into main-chat widgets. Recipes are under art/grimoire/recipes; build-grimoire-materials.py and build-grimoire-controls.js reproduce production exports. Native visual review remains outstanding.",
+  "materialDrawings": {
+    "leather": "98ccb0a4-7ba2-417d-ab85-4f17fa786b35",
+    "parchment": "594c0d21-3502-4e05-a265-395e7e82c0f3",
+    "parchment-warm": "a7445a45-9491-450b-b737-d8d9b0021986"
+  },
+  "controlDrawings": {
+    "frames": "8b1c0e91-7659-41a1-9553-594cd8dfba14",
+    "icons": "c755cd54-d741-40c1-973b-215adf80100a",
+    "navigation": "d7347330-e6f5-4d81-a4d1-04321548b209",
+    "gems": "6cfbf482-0bf3-4ce6-948c-b9c2b09dcb06"
+  },
+  "illustratedRevision": {
+    "provider": "OpenAI image_gen",
+    "reason": "Native screenshot showed the first procedural skin was materially flatter than the approved concept.",
+    "masters": ["art/grimoire/masters/window-frame.png", "art/grimoire/masters/controls.png"],
+    "exporter": "tools/import-grimoire-illustrated.py",
+    "notes": "Preserve high-resolution original artwork; crop gutters and export per-axis slices plus repeating rails. The original PixelLab frame sheet is historical, not the production frame source. Native visual QA of this revision remains pending."
+  },
+  "additionalAttempts": [
+    {"jobId":"37b82c88-751e-409b-b878-97f5eb39871a","id":"leather","review":"Rejected: lighting gradient unsuitable for tiling"},
+    {"jobId":"530593f3-0d77-40d8-b74c-00cba8d02f58","id":"parchment","review":"Provider returned blank image; failed, not charged"},
+    {"jobId":"6eaf5029-b009-4a31-a7fc-09357b482bc3","id":"parchment-warm","review":"Provider returned blank image; failed, not charged"}
+  ],
+  "jobs": [
+    {
+      "id": "emblem",
+      "jobId": "07b0b8bd-222f-433d-9b56-114e65b8262c",
+      "assetId": "39ef0066-672b-5aa8-ae31-a494b07ee614",
+      "designApproved": true
+    },
+    {
+      "id": "leather",
+      "jobId": "e42a1a8d-bdbf-49af-a67d-b2ce1fddb970",
+      "assetId": "fc1f241e-d311-5bcf-a516-65905743c2d7",
+      "designApproved": false,
+      "review": "Rejected as a tile: baked border and stitches would repeat at seams. Not imported into runtime."
+    },
+    {
+      "id": "parchment",
+      "jobId": "3ae92bb5-53ea-4543-8a7e-99ab46d226ef",
+      "assetId": "a5515584-e9dd-5c27-bf51-3cca0600b3cd",
+      "designApproved": false,
+      "review": "Rejected as a tile: isolated paper sheet with black surrounding pixels and torn edges. Not imported into runtime."
+    }
+  ]
+}

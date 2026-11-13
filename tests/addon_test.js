@@ -14,6 +14,37 @@ const { lua, lauxlib, lualib, to_luastring, to_jsstring } = fengari;
 const ADDON = path.join(__dirname, '..', 'addon', 'AzerMind');
 const CELLS_PER_ROW = 200;
 
+test('grimoire materials reach actual chat widgets and repeat at native size on resize',()=>{
+  const vm=newVM(); login(vm);
+  vm.run(`
+    AzerMind.Toggle(true)
+    local chat=AzerMindDB.chats[1]
+    chat.history={{role="user",text="paper question",when="20:21"},{role="assistant",text="paper answer",when="20:22"}}
+    AzerMind.Render()
+    TEST_USER=AzerMindContent.children[1]
+    TEST_AI=AzerMindContent.children[2]
+  `);
+  assert.match(vm.evaluate('AzerMindFrame.grimoireMaterial.texture'),/leather\.tga$/);
+  assert.match(vm.evaluate('AzerMindScroll.grimoireMaterial.texture'),/parchment\.tga$/);
+  assert.match(vm.evaluate('AzerMindInputScroll.parent.grimoireMaterial.texture'),/parchment\.tga$/);
+  assert.ok(vm.num('TEST_USER.bg.color[4]')<0.1);
+  assert.ok(vm.num('TEST_AI.bg.color[4]')<0.1);
+  assert.ok(vm.num('TEST_AI.body.textColor[1]')<0.3);
+  assert.equal(vm.num('TEST_AI.body.shadowColor[4]'),0);
+  assert.ok(vm.num('AzerMindInput.textColor[1]')<0.3);
+  assert.equal(vm.evaluate('TEST_USER.grimoireFrame'),null);
+  vm.run(`
+    TEST_RESIZES=#AzerMindFrame.hooks.OnSizeChanged
+    AzerMindFrame:SetSize(1600,1000)
+    for _,fn in ipairs(AzerMindFrame.hooks.OnSizeChanged) do fn(AzerMindFrame,1600,1000) end
+    AzerMindTheme.Material(AzerMindFrame,"leather")
+  `);
+  assert.equal(vm.num('AzerMindFrame.grimoireMaterial.texCoords[2]'),1592/256);
+  assert.equal(vm.num('AzerMindFrame.grimoireMaterial.texCoords[4]'),992/256);
+  assert.equal(vm.num('#AzerMindFrame.hooks.OnSizeChanged'),vm.num('TEST_RESIZES'));
+  assert.equal(vm.evaluate('AzerMindTheme.PaperText("|cffd3b66f|Hitem:6265|h[Soul Shard]|h|r")'),'|cff765013|Hitem:6265|h[Soul Shard]|h|r');
+});
+
 test('quest location dropdowns cascade in both tabs and preserve hidden selections',()=>{
   const vm=newVM(); login(vm);
   vm.run(`
@@ -546,7 +577,7 @@ test('until the bridge answers, Connect replaces Send and a message stays in the
   vm.run('AzerMind.Toggle(true)');
   assert.equal(vm.evaluate('AzerMind.IsConnected()'), 'false');
   const texts = () => vm.evaluate('table.concat(STUB.texts, "|")');
-  assert.ok(texts().includes('Not connected - start the bridge, then click Connect'));
+  assert.ok(texts().includes('Bridge offline'));
   // Sending while disconnected puts the text back in the box and starts a connect attempt.
   vm.run('AzerMindInput:SetText("fix the bug"); AzerMind.SendFromInput()');
   assert.equal(vm.evaluate('AzerMindDB.chats[1].pendingId'), null, 'nothing sent');
@@ -555,11 +586,11 @@ test('until the bridge answers, Connect replaces Send and a message stays in the
   assert.equal(hello.length, 1);
   assert.equal(hello[0].flags, 'h;c', 'a hello went out instead');
   assert.ok(texts().includes('Connecting...'));
-  assert.ok(texts().includes('your message goes out as soon as it answers'));
+  assert.ok(texts().includes('Bridge connecting'));
   // No answer within CONNECT_WAIT: the attempt is reported as failed, Connect is back.
   vm.run('STUB.now = STUB.now + 20; STUB.Tick()');
   assert.equal(vm.evaluate('AzerMind.IsConnected()'), 'false');
-  assert.ok(texts().includes('No answer from the bridge'));
+  assert.ok(texts().includes('Bridge offline'));
   assert.equal(vm.evaluate('AzerMindInput:GetText()'), 'fix the bug', 'message still in the box after a failed attempt');
   // Click Connect again; this time the bridge answers the hello poll. Nothing was
   // queued by that click, so the message waits for the user.
@@ -760,7 +791,7 @@ test('replies saved under the old "claude" role are read as assistant replies fr
   assert.equal(vm.evaluate('AzerMindDB.chats[1].agent'), '');
   // Before the bridge has said which agent it runs, the label falls back to "AI".
   vm.run('AzerMind.Toggle(true)');
-  assert.ok(vm.evaluate('table.concat(STUB.texts, "|")').includes('|Claude|'), 'the old reply is labelled Claude');
+  assert.ok(vm.evaluate('table.concat(STUB.texts, "|")').includes('|- Claude|'), 'the old reply keeps its historical provider label');
 });
 
 test('free text that starts with a command word is sent as a message; exact commands still run', () => {
@@ -1080,11 +1111,11 @@ test('header latency reads game Home/World and tolerates missing API without sen
   const vm=newVM(); login(vm);
   const seq=vm.num('AzerMindDB.lastSeq');
   vm.run('GetNetStats=function() return 0, 0, 45, 67 end; AzerMind.UpdateLatency()');
-  assert.equal(vm.evaluate('AzerMindLatency:GetText()'), 'Home 45 / World 67 ms');
+  assert.equal(vm.evaluate('AzerMindLatency:GetText()'), '67 ms');
   vm.run('GetNetStats=nil; AzerMind.UpdateLatency()');
-  assert.equal(vm.evaluate('AzerMindLatency:GetText()'), 'Home -- / World -- ms');
+  assert.equal(vm.evaluate('AzerMindLatency:GetText()'), '-- ms');
   vm.run('GetNetStats=function() error("unavailable") end; AzerMind.UpdateLatency()');
-  assert.equal(vm.evaluate('AzerMindLatency:GetText()'), 'Home -- / World -- ms');
+  assert.equal(vm.evaluate('AzerMindLatency:GetText()'), '-- ms');
   assert.equal(vm.num('AzerMindDB.lastSeq'), seq);
 });
 

@@ -12,13 +12,19 @@ STUB = {
 }
 
 local function noop() end
+STUB.unsupportedCalls={}
+STUB.strictUI=false
 unpack = unpack or table.unpack -- WoW exposes the Lua 5.1 global; Fengari uses 5.3.
 
 local Methods = {}
 local FrameMT = {
 	__index = function(t, k)
 		if type(k) == "string" and k:match("^%u") then
-			return Methods[k] or noop
+			if Methods[k] then return Methods[k] end
+            return function(...)
+                STUB.unsupportedCalls[k]=(STUB.unsupportedCalls[k] or 0)+1
+                if STUB.strictUI then error("Unmodeled WoW API: "..k) end
+            end
 		end
 	end,
 }
@@ -46,8 +52,12 @@ function Methods.Hide(self)
 end
 function Methods.SetShown(self, v) if v then self:Show() else self:Hide() end end
 function Methods.IsShown(self) return self.shown end
-function Methods.IsVisible(self) return self.shown end
-function Methods.SetText(self, t) self.text = t; table.insert(STUB.texts, tostring(t)) end
+function Methods.IsVisible(self)
+ local node=self
+ while node do if node.shown==false then return false end;node=node.parent end
+ return true
+end
+function Methods.SetText(self, t) self.text = t; if self.fontString then self.fontString.text=t end; table.insert(STUB.texts, tostring(t)) end
 function Methods.GetText(self) return self.text or "" end
 function Methods.SetChecked(self,value) self.checked=value and true or false end
 function Methods.GetChecked(self) return self.checked or false end
@@ -61,19 +71,32 @@ function Methods.SetSize(self, w, h) self.width, self.height = w, h end
 function Methods.SetWidth(self, w) self.width = w end
 function Methods.SetHeight(self, h) self.height = h end
 function Methods.GetSize(self) return self:GetWidth(), self:GetHeight() end
+function Methods.SetScrollChild(self, child) self.scrollChild=child end
+function Methods.GetScrollChild(self) return self.scrollChild end
+function Methods.SetResizeBounds(self, minW, minH, maxW, maxH) self.resizeBounds={minW,minH,maxW,maxH} end
 function Methods.GetStringHeight(self) return 14 end
 function Methods.GetStringWidth(self) return 100 end
-function Methods.GetFontString(self) return self end
+function Methods.SetFontString(self, region) self.fontString=region end
+function Methods.GetFontString(self) return self.fontString or self end
 function Methods.GetPoint(self) return "CENTER", nil, "CENTER", 0, 0 end
 function Methods.SetPoint(self, point, rel, relPoint, x, y)
-	if type(rel) == "number" then x, y = rel, relPoint end
+	if type(rel) == "number" then x, y, rel, relPoint = rel, relPoint, self.parent, point end
+	if not rel then rel=self.parent end
+	if type(relPoint)=="number" then x,y,relPoint=relPoint,x,point end
+	self.points=self.points or {}
+	self.points[point]={relative=rel,relativePoint=relPoint or point,x=x or 0,y=y or 0}
 	self.x, self.y = x or 0, y or 0
+end
+function Methods.ClearAllPoints(self) self.points={} end
+function Methods.SetAllPoints(self, relative)
+	self:ClearAllPoints(); self:SetPoint("TOPLEFT",relative or self.parent,"TOPLEFT"); self:SetPoint("BOTTOMRIGHT",relative or self.parent,"BOTTOMRIGHT")
 end
 function Methods.GetVerticalScrollRange(self) return 0 end
 function Methods.GetVerticalScroll(self) return self.verticalScroll or 0 end
 function Methods.SetVerticalScroll(self,value) self.verticalScroll=value end
-function Methods.CreateTexture(self, name, layer)
+function Methods.CreateTexture(self, name, layer, template, sublevel)
 	local t = NewObject("Texture", name, self)
+	t.drawLayer,t.drawSublevel=layer,sublevel or 0
 	table.insert(self.textures, t)
 	return t
 end
@@ -86,6 +109,32 @@ function Methods.Stop(self) self.playing = false end
 function Methods.SetColorTexture(self, r, g, b, a) self.color = { r, g, b, a } end
 function Methods.SetTexture(self, path) self.texture = path; return true end
 function Methods.GetTexture(self) return self.texture end
+function Methods.SetTexCoord(self, ...) self.texCoords = {...} end
+function Methods.SetHorizTile(self, value) self.horizTile = value end
+function Methods.SetVertTile(self, value) self.vertTile = value end
+function Methods.SetAlpha(self, value) self.alpha=value end
+function Methods.GetAlpha(self) return self.alpha or 1 end
+function Methods.SetVertexColor(self, ...) self.vertexColor = {...} end
+function Methods.SetTextColor(self, ...) self.textColor = {...} end
+function Methods.SetShadowColor(self, ...) self.shadowColor = {...} end
+function Methods.SetFont(self, file, size, flags) self.font={file=file,size=size,flags=flags} end
+function Methods.GetRegions(self) return unpack(self.textures) end
+function Methods.IsEnabled(self) return self.enabled ~= false end
+function Methods.SetEnabled(self, enabled)
+	local was=self:IsEnabled(); self.enabled=not not enabled
+	if was~=self.enabled then
+		local event=self.enabled and "OnEnable" or "OnDisable"
+		if self.scripts[event] then self.scripts[event](self) end
+		for _,hook in ipairs(self.hooks[event] or {}) do hook(self) end
+	end
+end
+function Methods.Enable(self) self:SetEnabled(true) end
+function Methods.Disable(self) self:SetEnabled(false) end
+function Methods.SetNormalTexture(self, texture) self.normalTexture=texture end
+function Methods.SetPushedTexture(self, texture) self.pushedTexture=texture end
+function Methods.SetDisabledTexture(self, texture) self.disabledTexture=texture end
+function Methods.SetHighlightTexture(self, texture) self.highlightTexture=texture end
+function Methods.GetThumbTexture(self) return self.thumbTexture end
 function Methods.SetBackdrop(self, t)
 	-- The real client would silently draw nothing; make it a test failure instead.
 	assert(type(t) == "table", "SetBackdrop called with " .. tostring(t) .. " on " .. tostring(self.name or self.kind))
@@ -116,6 +165,12 @@ end
 function CreateFrame(kind, name, parent, template)
 	local f = NewObject(kind, name, parent)
 	f.template = template
+	if template=="UIPanelScrollFrameTemplate" then
+		f.ScrollBar=NewObject("Slider",name and name.."ScrollBar",f)
+		f.ScrollBar.thumbTexture=f.ScrollBar:CreateTexture(nil,"ARTWORK")
+		f.ScrollBar.ScrollUpButton=NewObject("Button",nil,f.ScrollBar)
+		f.ScrollBar.ScrollDownButton=NewObject("Button",nil,f.ScrollBar)
+	end
 	table.insert(STUB.frames, f)
 	return f
 end
@@ -237,3 +292,37 @@ function print(...)
 	for i = 1, select("#", ...) do parts[i] = tostring((select(i, ...))) end
 	table.insert(STUB.prints, table.concat(parts, " "))
 end
+
+function Methods.SetMinMaxValues(self,minimum,maximum) self.minimum,self.maximum=minimum,maximum end
+function Methods.SetValue(self,value)
+ self.value=math.max(self.minimum or value,math.min(self.maximum or value,value))
+ if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self,self.value) end
+end
+function Methods.GetValue(self) return self.value end
+function Methods.SetIgnoreParentAlpha(self,value) self.ignoreParentAlpha=value end
+
+-- Visual semantics that must never be substituted with permissive no-ops.
+function Methods.GetEffectiveAlpha(self)
+ local alpha,node=1,self
+ while node do
+  alpha=alpha*(node.alpha or 1)
+  if node.ignoreParentAlpha then break end
+  node=node.parent
+ end
+ return alpha
+end
+function Methods.SetDrawLayer(self,layer,sublevel) self.drawLayer,self.drawSublevel=layer,sublevel or 0 end
+function Methods.SetClipsChildren(self,value) self.clipsChildren=value end
+function Methods.SetRotation(self,value) self.rotation=value end
+function Methods.EnableMouse(self,value) self.mouseEnabled=value end
+function Methods.SetScale(self,value) self.scale=value end
+function Methods.GetScale(self) return self.scale or 1 end
+function Methods.SetFrameStrata(self,value) self.strata=value end
+function Methods.GetFrameStrata(self) return self.strata or (self.parent and self.parent:GetFrameStrata()) or "MEDIUM" end
+function Methods.SetJustifyH(self,value) self.justifyH=value end
+function Methods.SetJustifyV(self,value) self.justifyV=value end
+
+-- Record native window policy; this mock does not rasterize overlapping addons.
+function Methods.SetToplevel(self,value) self.toplevel=value end
+function Methods.SetFlattensRenderLayers(self,value) self.flattensRenderLayers=value end
+function Methods.Raise(self) self.raiseCount=(self.raiseCount or 0)+1 end

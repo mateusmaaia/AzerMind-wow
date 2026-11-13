@@ -144,6 +144,8 @@ function AzerMind.ShowItemPicker()
 						GameTooltip:SetOwner(self,"ANCHOR_RIGHT"); GameTooltip:ClearLines()
 						Read(GameTooltip.SetHyperlink,GameTooltip,self.item.link)
 						if p.mode=="catalog" then GameTooltip:AddLine(AzerMind.CatalogItemDetails(self.item.id),0.8,0.85,0.85,true) end
+						local auction = AzerMind.AuctionItemDetails and AzerMind.AuctionItemDetails(self.item.id)
+						if auction then GameTooltip:AddLine(auction,0.8,0.85,0.85,true) end
 						GameTooltip:Show()
 					end)
 					row:RegisterForClicks("LeftButtonUp","RightButtonUp")
@@ -251,6 +253,8 @@ function AzerMind.ShowItemPicker()
 					if p.mode=="catalog" then AzerMind.EnrichCatalogItem(item) end
 					lines[#lines+1]=item.location..": "..item.link.." ×"..item.count..(item.location=="Bank" and (" (bank snapshot: "..(Cache().updated or "unknown")..")") or "")
 					if p.mode=="catalog" then lines[#lines+1]=AzerMind.CatalogItemDetails(item.id) end
+					local auction = AzerMind.AuctionItemDetails and AzerMind.AuctionItemDetails(item.id)
+					if auction then lines[#lines+1]=auction end
 				end
 			end
 			lines[#lines+1]="--- End selected inventory items ---"

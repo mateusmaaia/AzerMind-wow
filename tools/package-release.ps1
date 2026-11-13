@@ -1,6 +1,10 @@
 param([string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+& node (Join-Path $PSScriptRoot 'visual-review.js') --verify
+if ($LASTEXITCODE -ne 0) { throw 'Release blocked: current build requires human visual review in WoW.' }
+& node (Join-Path $PSScriptRoot 'check-ui.js')
+if ($LASTEXITCODE -ne 0) { throw 'Release blocked: UI code checks failed.' }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repoRoot 'releases' }
 $manifest = Get-Content -LiteralPath (Join-Path $repoRoot 'addon\AzerMind_Data\manifest.json') -Raw | ConvertFrom-Json
 $package = Get-Content -LiteralPath (Join-Path $repoRoot 'package.json') -Raw | ConvertFrom-Json

@@ -17,3 +17,6 @@ tests/tmp/
 bridge/probe.png
 bridge/mapjobs/
 __pycache__/
+
+# Local installation recovery snapshots
+backups/grimoire/

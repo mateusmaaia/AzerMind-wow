@@ -4,7 +4,7 @@
 ## Author: AzerMind contributors; original wow-ai by chelinho139
 ## Version: 0.5.0
 ## SavedVariables: AzerMindDB, AzerMindMapDB, AzerMindItemsDB
-## OptionalDeps: AzerMind_Nodes
+## OptionalDeps: AzerMind_Nodes, AHledger
 
 Codec.lua
 Inbox.lua
@@ -14,6 +14,7 @@ Links.lua
 Settings.lua
 Quests.lua
 Catalog.lua
+Auction.lua
 Items.lua
 InstancesData.lua
 Instances.lua

@@ -147,6 +147,10 @@ function copyAddon(client) {
   let copied = 0;
   for (const f of fs.readdirSync(ADDON_SRC)) {
     const target = path.join(dest, f);
+    if (fs.statSync(path.join(ADDON_SRC, f)).isDirectory()) {
+      fs.cpSync(path.join(ADDON_SRC, f), target, {recursive:true});
+      continue;
+    }
     if (f === 'Inbox.lua' && fs.existsSync(target)) continue; // the bridge owns it once running
     fs.copyFileSync(path.join(ADDON_SRC, f), target);
     copied++;
