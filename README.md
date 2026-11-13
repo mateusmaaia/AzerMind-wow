@@ -30,6 +30,12 @@ values. Without AHledger or an available price, browsing works as usual.
 AHledger sync refreshes its data; AzerMind makes no network requests for prices.
 Prices from [AHledger](https://ahledger.com); see its [integration documentation](https://ahledger.com/developers).
 
+Item picker tooltips show a compact price summary. Hold **Shift** while hovering
+to expand market, quantity and observation details. Item attachments retain the
+full data. **Config > About & credits** lists project authors, optional
+integrations and data sources, with a button to copy the credits and addresses.
+AHledger's required attribution stays beside its prices.
+
 ## Requirements
 
 - **World of Warcraft: Forever**, interface **16001**. Compatibility with Retail or other Classic clients is not established.

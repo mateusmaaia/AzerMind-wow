@@ -140,18 +140,26 @@ function AzerMind.ShowItemPicker()
 					row.title=T.Label(row,"",68,-1); row.title:SetWidth(438); row.title:SetJustifyH("LEFT"); row.title:SetWordWrap(false)
 					row.detail=T.Label(row,"",68,-22); row.detail:SetWidth(438); row.detail:SetJustifyH("LEFT"); row.detail:SetWordWrap(false); T.Color(row.detail,"SetTextColor","muted")
 					row:SetScript("OnClick",function(self) p.selected[self.item.key]=self:GetChecked() or nil; if p.onlySelected then p.query=nil end; Render() end)
-					row:SetScript("OnEnter",function(self)
+					local function ShowItemTooltip(self)
+                        self.auctionExpanded = IsShiftKeyDown and IsShiftKeyDown() or false
 						GameTooltip:SetOwner(self,"ANCHOR_RIGHT"); GameTooltip:ClearLines()
 						Read(GameTooltip.SetHyperlink,GameTooltip,self.item.link)
 						if p.mode=="catalog" then GameTooltip:AddLine(AzerMind.CatalogItemDetails(self.item.id),0.8,0.85,0.85,true) end
-						local auction = AzerMind.AuctionItemDetails and AzerMind.AuctionItemDetails(self.item.id)
+						local auction = AzerMind.AuctionItemDetails and AzerMind.AuctionItemDetails(self.item.id, not self.auctionExpanded)
 						if auction then GameTooltip:AddLine(auction,0.8,0.85,0.85,true) end
 						GameTooltip:Show()
-					end)
+                    end
+                    row:SetScript("OnEnter",function(self)
+                        ShowItemTooltip(self)
+                        self:SetScript("OnUpdate",function(owner)
+                            local expanded = IsShiftKeyDown and IsShiftKeyDown() or false
+                            if GameTooltip:GetOwner() == owner and expanded ~= owner.auctionExpanded then ShowItemTooltip(owner) end
+                        end)
+                    end)
 					row:RegisterForClicks("LeftButtonUp","RightButtonUp")
                     local select=row:GetScript("OnClick")
                     row:SetScript("OnClick",function(self,button) if button=="RightButton" then AzerMind.ShowSourceBrowser("item",self.item.id) else select(self) end end)
-                    row:SetScript("OnLeave",function() GameTooltip:Hide() end); p.rows[used]=row
+                    row:SetScript("OnLeave",function(self) self:SetScript("OnUpdate",nil); GameTooltip:Hide() end); p.rows[used]=row
 				end
 				row:ClearAllPoints(); row:SetPoint("TOPLEFT",0,-(i-1)*48)
 				row.item=item; row:SetChecked(p.selected[item.key] or false); row.icon:SetTexture(item.icon or 134400)

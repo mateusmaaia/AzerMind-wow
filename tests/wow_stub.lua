@@ -57,6 +57,8 @@ function Methods.IsVisible(self)
  while node do if node.shown==false then return false end;node=node.parent end
  return true
 end
+function Methods.SetOwner(self, owner) self.owner = owner end
+function Methods.GetOwner(self) return self.owner end
 function Methods.SetText(self, t) self.text = t; if self.fontString then self.fontString.text=t end; table.insert(STUB.texts, tostring(t)) end
 function Methods.GetText(self) return self.text or "" end
 function Methods.SetChecked(self,value) self.checked=value and true or false end

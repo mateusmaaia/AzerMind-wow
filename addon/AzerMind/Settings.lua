@@ -39,7 +39,7 @@ function AzerMind.CodexPrompt(id)
 		local function Navigate(action)
 			if p.dirty or p.pending then p.message="Save or cancel changes before switching settings."; p.Refresh(); return end
 			p:Hide(); action()
-            local child=AzerMindAppearanceSettings and AzerMindAppearanceSettings:IsShown() and AzerMindAppearanceSettings or AzerMindGuideSettings and AzerMindGuideSettings:IsShown() and AzerMindGuideSettings or AzerMindContextSettings and AzerMindContextSettings:IsShown() and AzerMindContextSettings or AzerMindNotificationSettings and AzerMindNotificationSettings:IsShown() and AzerMindNotificationSettings or AzerMindKeySettings
+            local child=AzerMindCreditsSettings and AzerMindCreditsSettings:IsShown() and AzerMindCreditsSettings or AzerMindAppearanceSettings and AzerMindAppearanceSettings:IsShown() and AzerMindAppearanceSettings or AzerMindGuideSettings and AzerMindGuideSettings:IsShown() and AzerMindGuideSettings or AzerMindContextSettings and AzerMindContextSettings:IsShown() and AzerMindContextSettings or AzerMindNotificationSettings and AzerMindNotificationSettings:IsShown() and AzerMindNotificationSettings or AzerMindKeySettings
             if child then
                 if not child.parentBackHook then
                     child:HookScript("OnHide",function(self) if self.returnSettings and not self:IsShown() then self.returnSettings=false; panel:Show() end end)
@@ -54,6 +54,7 @@ function AzerMind.CodexPrompt(id)
         Flat(side,"Notifications",126,10,-120,function() Navigate(AzerMind.ShowNotificationSettings) end)
         Flat(side,"Key bindings",126,10,-156,function() Navigate(AzerMind.ShowKeySettings) end)
         Flat(side,"Appearance",126,10,-192,function() Navigate(AzerMind.ShowAppearanceSettings) end)
+        Flat(side,"About & credits",126,10,-228,function() Navigate(AzerMind.ShowCreditsSettings) end)
 		Label(p, "AI Config", 180, -80, "GameFontNormalLarge")
 		Label(p, "Applies to", 180, -105)
 		p.scope = "conversation"
@@ -397,4 +398,50 @@ function AzerMind.ShowAppearanceSettings()
  end
  local p=appearancePanel;p.loading=true;p.slider:SetValue(AzerMind.GetOpacity()*100)
  p.percent:SetText(math.floor(AzerMind.GetOpacity()*100+0.5).."%");p.loading=false;p:Show()
+end
+
+
+function AzerMind.ShowCreditsSettings()
+    local p = AzerMindCreditsSettings
+    if not p then
+        p = CreateFrame("Frame", "AzerMindCreditsSettings", AzerMindFrame, "BackdropTemplate")
+        p:SetSize(600, 470); p:SetPoint("CENTER", AzerMindFrame, "CENTER")
+        p:SetFrameStrata("FULLSCREEN_DIALOG"); p:SetFrameLevel(AzerMindFrame:GetFrameLevel()+100)
+        p:EnableMouse(true); Solid(p, "window"); Theme.FitDialog(p)
+        table.insert(UISpecialFrames, "AzerMindCreditsSettings")
+        Label(p, "About & credits", 24, -24, "GameFontNormalLarge")
+        local intro = Label(p, "AzerMind is made possible by these projects and contributors.", 24, -58)
+        intro:SetWidth(548); intro:SetJustifyH("LEFT")
+        local entries = {
+            {"AzerMind contributors", "Fork development, character tools, catalogs and interface.", "https://github.com/mateusmaaia/AzerMind-wow"},
+            {"chelinho139 / wow-ai", "Original addon, conversations, agent bridge, transport, maps and macros. Original MIT copyright retained.", "https://github.com/chelinho139/wow-ai"},
+            {"AHledger", "Optional auction prices from player scans. Bundled snapshots are labeled; prices are not guaranteed sales.", "Prices from AHledger (ahledger.com)"},
+            {"GearQuest Forever", "Optional active equipment hunts for the current character. AzerMind reads recommendations without changing them."},
+            {"ForeverDungeonJournal", "Optional dungeon loot sources and bundled factual instance references. Authors and contributors retain credit."},
+            {"Questie and QuestieDB teams and contributors", "Bundled item, quest, NPC and object records. Source licenses, historical notices and provenance accompany the data.", "https://github.com/Questie/QuestieDB"},
+            {"0xInuarashi / wow-forever-codex", "Pixel-output research and Forever file-loading findings used by the original project.", "https://github.com/0xinuarashi/wow-forever-codex"},
+            {"Gethe / wow-ui-source", "Blizzard UI source mirror used to check client APIs.", "https://github.com/Gethe/wow-ui-source"},
+            {"Blizzard Entertainment", "World of Warcraft, game assets and announced raid information belong to their respective owners."},
+        }
+        local scroll = CreateFrame("ScrollFrame", "AzerMindCreditsScroll", p, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", p, "TOPLEFT", 24, -92); scroll:SetSize(520, 300)
+        local content = CreateFrame("Frame", nil, scroll); content:SetWidth(516)
+        scroll:SetScrollChild(content); Theme.Scrollbar(scroll)
+        local y, text = 0, {}
+        for _,entry in ipairs(entries) do
+            local title = Label(content, entry[1], 0, -y, "GameFontNormal")
+            title:SetWidth(510); title:SetJustifyH("LEFT")
+            local description = Label(content, entry[2] .. (entry[3] and ("\n" .. entry[3]) or ""), 0, -y-24)
+            description:SetWidth(510); description:SetJustifyH("LEFT"); description:SetWordWrap(true)
+            y = y + 24 + description:GetStringHeight() + 22
+            text[#text+1] = table.concat(entry, "\n")
+        end
+        content:SetHeight(y)
+        p.creditText = table.concat(text, "\n\n") .. "\n\nFull licenses and source provenance are included with the addon. This is an independent community project."
+        local footnote = Label(p, "Full licenses and source notices are included with the addon.", 24, -406)
+        footnote:SetWidth(548); footnote:SetJustifyH("LEFT")
+        Button(p, "Copy credits", 130, 300, -430, function() AzerMind.ShowCopy(p.creditText) end)
+        Button(p, "Close", 110, 446, -430, function() p:Hide() end)
+    end
+    p:Show()
 end
