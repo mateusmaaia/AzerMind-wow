@@ -250,7 +250,7 @@ function AzerMind.ShowContextSettings()
 				p.dirty=true
 			end)
 		end
-		local help = Label(p, "Pet abilities and individual talent ranks are not collected. Missing data and size limits are marked in the preview. Turning sharing off does not erase previously sent data.", 20, -338)
+		local help = Label(p, "The preview marks missing data and size limits. Previously shared data may still appear in your chat history.", 20, -338)
 		help:SetWidth(560); help:SetJustifyH("LEFT")
 		Button(p, "Preview", 110, 20, -414, function()
 			AzerMind.ShowCopy(p.enabled and AzerMind.GameContext(p.options) or "Automatic character context sharing is off.")

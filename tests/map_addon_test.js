@@ -65,7 +65,7 @@ function Methods.SetFrameLevel(self, l) self.level = l end
   stub = stub.replace('local function NewObject(', 'function NewObjectPublic(').replace(/NewObject\(/g, 'NewObjectPublic(');
   run(stub);
   run(MAP_STUB);
-  for (const f of ['Codec.lua', 'Inbox.lua', 'AzerMind.lua', 'Map.lua']) run(fs.readFileSync(path.join(ADDON, f), 'utf8'), 'AzerMind');
+  for (const f of ['Codec.lua', 'Inbox.lua', 'AzerMind.lua', 'TalentContext.lua', 'Map.lua']) run(fs.readFileSync(path.join(ADDON, f), 'utf8'), 'AzerMind');
   run('STUB.FireEvent("ADDON_LOADED", "AzerMind"); STUB.FireEvent("PLAYER_LOGIN")');
   return { run, evaluate, num };
 }

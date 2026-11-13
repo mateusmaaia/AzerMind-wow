@@ -167,7 +167,7 @@ function newVM() {
   };
   const num = (expr) => Number(evaluate(expr));
   run(fs.readFileSync(path.join(__dirname, 'wow_stub.lua'), 'utf8'));
-  for (const f of ['Codec.lua', 'Inbox.lua', 'Theme.lua', 'AzerMind.lua', 'Links.lua', 'Settings.lua', 'Quests.lua', 'Catalog.lua', 'Items.lua', 'InstancesData.lua', 'Instances.lua']) run(fs.readFileSync(path.join(ADDON, f), 'utf8'), 'AzerMind');
+  for (const f of ['Codec.lua', 'Inbox.lua', 'Theme.lua', 'AzerMind.lua', 'TalentContext.lua', 'Links.lua', 'Settings.lua', 'Quests.lua', 'Catalog.lua', 'Items.lua', 'InstancesData.lua', 'Instances.lua']) run(fs.readFileSync(path.join(ADDON, f), 'utf8'), 'AzerMind');
   return { run, evaluate, num };
 }
 
@@ -1122,6 +1122,166 @@ test('reload mode writes the outbox for the bridge instead of drawing the strip'
 });
 
 
+function foreverTalents(vm) {
+  vm.run(`
+    GetNumTalentTabs, GetTalentTabInfo, GetNumTalents, GetTalentInfo = nil, nil, nil, nil
+    FROST_RANK = 3
+    C_ClassTalents = {GetActiveConfigID = function() return 7 end}
+    C_Traits = {
+      GetConfigInfo = function(configID) assert(configID == 7); return {treeIDs = {111}} end,
+      ConfigHasStagedChanges = function() return false end,
+      GetGroupDisplayInfoByTreeID = function(treeID)
+        assert(treeID == 111)
+        return {{groupID = 21, displayName = "Arcane"}, {groupID = 22, displayName = "Fire"}, {groupID = 23, displayName = "Frost"}}
+      end,
+      GetGroupCurrencyInfo = function(configID)
+        assert(configID == 7)
+        return {{traitNodeGroupID = 23, currencyInfos = {{spent = FROST_RANK}}},
+                {traitNodeGroupID = 22, currencyInfos = {{spent = 0}}},
+                {traitNodeGroupID = 21, currencyInfos = {{spent = 1}}}}
+      end,
+      GetTreeCurrencyInfo = function(configID, treeID, excludeStaged)
+        assert(configID == 7 and treeID == 111 and excludeStaged)
+        return {{traitCurrencyID = 1, quantity = 4 - FROST_RANK}}
+      end,
+      GetTreeNodes = function() return {12, 15, 19} end,
+      GetNodeInfo = function(configID, id)
+        if id == 12 then
+          return {ranksPurchased = FROST_RANK, maxRanks = 5, groupIDs = {23}, activeEntry = {entryID = 120}}
+        elseif id == 15 then
+          return {ranksPurchased = 1, maxRanks = 1, groupIDs = {21, 22}, entryIDs = {150, 151}, activeEntry = {entryID = 151}}
+        end
+        return {ranksPurchased = 0, activeRank = 1, maxRanks = 1, groupIDs = {23}, activeEntry = {entryID = 190}}
+      end,
+      GetEntryInfo = function(configID, id) return {definitionID = id + 100, maxRanks = id == 120 and 5 or 1} end,
+      GetDefinitionInfo = function(id)
+        if id == 220 then return {spellID = 1401} end
+        if id == 251 then return {overrideName = "Arcane Focus", spellID = 1402} end
+        return {overrideName = "Unpurchased choice"}
+      end,
+    }
+    C_Spell = {GetSpellName = function(id) return id == 1401 and "Improved Frostbolt" or "Base spell" end}
+  `);
+}
+
+test('Forever talent context reports purchased ranks, shared choice, tree totals and unspent points', () => {
+  const vm = newVM(); login(vm); foreverTalents(vm);
+  const context = vm.evaluate('AzerMind.GameContext({talents=true})');
+  assert.match(context, /Talents: Arcane 1 \/ Fire 0 \/ Frost 3/);
+  assert.match(context, /Improved Frostbolt 3\/5 \(Frost\)/);
+  assert.match(context, /Arcane Focus 1\/1 \(Arcane \/ Fire\)/);
+  assert.equal(context.split('Arcane Focus').length, 2, 'a shared node appears once');
+  assert.match(context, /Unspent talent points: 1/);
+  assert.doesNotMatch(context, /Unpurchased choice|Base spell|partial|unavailable/i);
+  vm.run('C_ClassTalents.GetActiveConfigID = function() error("talents were disabled") end');
+  assert.equal(vm.evaluate('AzerMind.GameContext({talents=false})'), '');
+});
+
+test('Forever talent context marks pending changes, partial ranks and unavailable APIs', () => {
+  const vm = newVM(); login(vm); foreverTalents(vm);
+  const context = () => vm.evaluate('AzerMind.GameContext({talents=true})');
+  vm.run('C_Traits.ConfigHasStagedChanges = function() return true end');
+  assert.match(context(), /unavailable.*pending/i);
+  assert.doesNotMatch(context(), /Improved Frostbolt|Frost 3/);
+  vm.run('C_Traits.ConfigHasStagedChanges = function() return false end; C_Traits.GetEntryInfo = function() error("API unavailable") end');
+  assert.match(context(), /Talents: Arcane 1 \/ Fire 0 \/ Frost 3/);
+  assert.match(context(), /talent ranks.*unavailable/i);
+  vm.run('C_ClassTalents.GetActiveConfigID = function() error("no configuration") end');
+  assert.match(context(), /Talents: unavailable/i);
+});
+
+test('Forever talent context distinguishes zero purchased ranks from incomplete API data', () => {
+  const vm = newVM(); login(vm); foreverTalents(vm);
+  vm.run(`
+    C_Traits.GetNodeInfo = function() return {ranksPurchased = 0, maxRanks = 5} end
+    C_Traits.GetGroupCurrencyInfo = function()
+      return {{traitNodeGroupID = 21, currencyInfos = {{spent = 0}}},
+              {traitNodeGroupID = 22, currencyInfos = {{spent = 0}}},
+              {traitNodeGroupID = 23, currencyInfos = {{spent = 0}}}}
+    end
+    C_Traits.GetTreeCurrencyInfo = function() return {{quantity = 0}, {quantity = 12}} end
+  `);
+  const context = vm.evaluate('AzerMind.GameContext({talents=true})');
+  assert.match(context, /Talents: Arcane 0 \/ Fire 0 \/ Frost 0/);
+  assert.match(context, /Purchased talent ranks: none/);
+  assert.doesNotMatch(context, /Unspent talent points|partial|unavailable/i);
+});
+
+test('Forever talent context caps UTF-8 data and explicitly marks omitted ranks', () => {
+  const vm = newVM(); login(vm); foreverTalents(vm);
+  vm.run(`
+    C_Traits.GetTreeNodes = function() local nodes = {}; for i = 1, 200 do nodes[i] = i end; return nodes end
+    C_Traits.GetNodeInfo = function(configID, id)
+      return {ranksPurchased = 1, maxRanks = 5, groupIDs = {23}, activeEntry = {entryID = id}}
+    end
+    C_Traits.GetDefinitionInfo = function(id) return {overrideName = string.rep("á", 40) .. " " .. id} end
+  `);
+  const context = vm.evaluate('AzerMind.GameContext({talents=true})');
+  assert.match(context, /Talents: Arcane 1 \/ Fire 0 \/ Frost 3/);
+  assert.match(context, /talent ranks.*partial|partial.*talent ranks/i);
+  assert.ok(Buffer.byteLength(context) <= 3000);
+  assert.doesNotMatch(context, /�/);
+});
+
+test('Forever talent context keeps valid ranks when some nodes have malformed data', () => {
+  const vm = newVM(); login(vm); foreverTalents(vm);
+  vm.run(`
+    C_Traits.GetTreeNodes = function() return {12, 0/0, 15} end
+    local read = C_Traits.GetNodeInfo
+    C_Traits.GetNodeInfo = function(configID, id)
+      if id == 15 then return {ranksPurchased = 1, activeEntry = {entryID = 151}} end
+      return read(configID, id)
+    end
+    local entry = C_Traits.GetEntryInfo
+    C_Traits.GetEntryInfo = function(configID, id)
+      if id == 151 then return {definitionID = 251} end
+      return entry(configID, id)
+    end
+  `);
+  const context = vm.evaluate('AzerMind.GameContext({talents=true})');
+  assert.match(context, /Improved Frostbolt 3\/5/);
+  assert.match(context, /Arcane Focus 1/);
+  assert.match(context, /Purchased talent ranks:.*partial/);
+});
+
+test('legacy talent context accepts ID-first tabs and preserves the older name-first layout', () => {
+  const vm = newVM(); login(vm);
+  vm.run(`
+    GetNumTalentTabs = function() return 2 end
+    GetTalentTabInfo = function(i)
+      if i == 1 then return 81, "Arcane", "description", 123, 2 end
+      return "Frost", "icon", 0
+    end
+    GetNumTalents = function() return 1 end
+    GetTalentInfo = function(tab) return "Arcane Focus", 122, 1, 2, tab == 1 and 2 or 0, 5 end
+  `);
+  const context = vm.evaluate('AzerMind.GameContext({talents=true})');
+  assert.match(context, /Talents: Arcane 2 \/ Frost 0/);
+  assert.match(context, /Arcane Focus 2\/5 \(Arcane\)/);
+});
+
+test('bridge receives updated purchased ranks after the next message and respects talent sharing', () => {
+  const vm = newVM(); login(vm); connect(vm); foreverTalents(vm);
+  const P = require('../bridge/protocol');
+  const send = (message) => {
+    vm.run('AzerMind.Send(' + JSON.stringify(message) + ')');
+    const frame = decodeStrip(vm);
+    const job = P.jobsFromStrip(frame.id, frame.text).find(j => j.text === message);
+    assert.ok(job, 'bridge parses the question');
+    const chatId = vm.evaluate('AzerMindDB.chats[1].id');
+    const id = vm.num('AzerMindDB.chats[1].pendingId');
+    nextSlot(vm, '{ now = time(), replies = { { chat = "' + chatId + '", id = ' + id + ', status = "done", text = "ok" } } }');
+    vm.run('STUB.now = STUB.now + 6; STUB.Tick()');
+    return P.systemPrompt(job.ctx || '');
+  };
+  vm.run('AzerMind.SaveContextSettings({game=true, talents=true}, true)');
+  assert.match(send('initial talents'), /Improved Frostbolt 3\/5/);
+  vm.run('FROST_RANK = 4');
+  assert.match(send('updated talents'), /Improved Frostbolt 4\/5/);
+  vm.run('AzerMind.SaveContextSettings({game=true, talents=false}, true)');
+  assert.doesNotMatch(send('private talents'), /Improved Frostbolt|Talents:|Unspent talent points/);
+});
+
 test('character context defaults to basic, full includes equipment and preview does not send', () => {
   const vm = newVM(); login(vm); connect(vm);
   assert.equal(vm.evaluate('AzerMindDB.settings.contextMode'), 'basic');
@@ -1131,7 +1291,7 @@ test('character context defaults to basic, full includes equipment and preview d
   assert.equal(vm.evaluate('AzerMind.GameContext()'), basic);
   vm.run('AzerMind.SetContextMode("full")');
   const full = vm.evaluate('AzerMind.GameContext()');
-  for (const field of ['Position:', 'Money:', 'Talents:', 'Professions:', 'Learned spells:', 'Quest log:', 'Equipped items', 'Individual talent ranks: not collected']) assert.ok(full.includes(field), field);
+  for (const field of ['Position:', 'Money:', 'Talents:', 'Professions:', 'Learned spells:', 'Quest log:', 'Equipped items', 'Purchased talent ranks:']) assert.ok(full.includes(field), field);
   assert.ok(Buffer.byteLength(full) <= 14000);
   const before = vm.num('AzerMindDB.lastSeq');
   vm.run('for _, child in ipairs(AzerMindFrame.children) do if child.text == "View context" then child.scripts.OnClick() end end');

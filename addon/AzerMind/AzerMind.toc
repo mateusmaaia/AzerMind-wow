@@ -10,6 +10,7 @@ Codec.lua
 Inbox.lua
 Theme.lua
 AzerMind.lua
+TalentContext.lua
 Links.lua
 Settings.lua
 Quests.lua
