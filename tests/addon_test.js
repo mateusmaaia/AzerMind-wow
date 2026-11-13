@@ -392,6 +392,26 @@ test('hello goes out on the strip after login', () => {
   assert.equal(recs[0].session, vm.evaluate('AzerMindDB.session'));
 });
 
+test('pending pixel strips keep four physical pixels per cell after a window resize', () => {
+  for (const text of ['small', 'x'.repeat(6000)]) {
+    const vm = newVM();
+    login(vm); connect(vm);
+    vm.run(`AzerMind.Send(${JSON.stringify(text)})`);
+    const initial = decodeStrip(vm);
+    assert.ok(initial);
+    assert.ok(Math.abs(vm.num('AzerMindStrip:GetScale()') * 1080 / 768 - 1) < 0.00001);
+    vm.run('GetPhysicalScreenSize = function() return 1765, 993 end; STUB.now = STUB.now + 0.75; STUB.tickers[2]()');
+    assert.ok(Math.abs(vm.num('AzerMindStrip:GetScale()') * 993 / 768 - 1) < 0.00001, 'resize recalibrates a pending strip without a reload');
+    assert.equal(vm.num('AzerMindStrip.textures[1]:GetWidth()'), 4);
+    assert.equal(vm.num('AzerMindStrip:GetWidth()'), 800);
+    assert.ok(decodeStrip(vm), 'payload still decodes');
+    vm.run('GetPhysicalScreenSize = function() return 0, 0 end; STUB.tickers[2]()');
+    assert.ok(Math.abs(vm.num('AzerMindStrip:GetScale()') - 768 / 993) < 0.00001, 'transient zero dimensions keep the last valid scale');
+    vm.run('GetPhysicalScreenSize = function() return 1920, 1080 end; STUB.tickers[2]()');
+    assert.ok(Math.abs(vm.num('AzerMindStrip:GetScale()') * 1080 / 768 - 1) < 0.00001, 'restoring fullscreen recalibrates again');
+  }
+});
+
 test('outbound records replace field separators inside user text', () => {
   const vm = newVM();
   login(vm);
@@ -622,6 +642,64 @@ test('a message sent while disconnected goes out by itself once the bridge answe
   nextSlot(vm, '{ now = time(), cwd = "C:\\\\proj", replies = {} }');
   vm.run('STUB.now = STUB.now + 6; STUB.Tick()');
   assert.equal(stripRecords(vm).filter(r => r.text === 'fix the bug').length, 1);
+});
+
+for (const trigger of ['login', 'Connect']) {
+  test(`a delayed bridge answer connects after the first ${trigger} hello slot was stale`, () => {
+    const vm = newVM();
+    // Forever can report even empty sound files as playable.
+    vm.run('PlaySoundFile = function() return true, 1 end');
+    login(vm);
+    nextSlot(vm, '{ now = time() - 2200, replies = {} }');
+    vm.run('STUB.now = STUB.now + 2; STUB.Tick()'); // Initial idle poll.
+    if (trigger === 'login') vm.run('STUB.RunTimers()');
+    else vm.run('AzerMind.Connect()');
+    vm.run('for i = 1, 3 do STUB.now = STUB.now + 2; STUB.Tick() end');
+    assert.equal(vm.evaluate('AzerMind.IsConnected()'), 'false', 'the first hello slot was stale');
+
+    nextSlot(vm, '{ now = time(), replies = {} }');
+    vm.run('for i = 1, 2 do STUB.now = STUB.now + 2; STUB.Tick() end');
+    assert.equal(vm.evaluate('AzerMind.IsConnected()'), 'true', 'the next hello slot sees the bridge');
+    vm.run('STUB.onLoadAddOn = function() error("hello polled after the fresh reply") end');
+    vm.run('for i = 1, 5 do STUB.now = STUB.now + 2; STUB.Tick() end');
+  });
+}
+
+test('the final hello poll keeps the queued message until the bridge answers', () => {
+  const vm = newVM();
+  login(vm);
+  nextSlot(vm, '{ now = time() - 2200, replies = {} }');
+  vm.run('STUB.now = STUB.now + 2; STUB.Tick(); AzerMind.Toggle(true)');
+  vm.run('AzerMindInput:SetText("fix the bug"); AzerMind.SendFromInput()');
+  vm.run('for i = 1, 7 do STUB.now = STUB.now + 2; STUB.Tick() end');
+  assert.equal(vm.evaluate('AzerMindDB.chats[1].pendingId'), null);
+  assert.equal(vm.evaluate('AzerMindInput:GetText()'), 'fix the bug');
+
+  // The next tick is 16 seconds after Connect. A reply arriving within the
+  // 15-second window still needs to be read before timing out the draft.
+  nextSlot(vm, '{ now = time() - 1, replies = {} }');
+  vm.run('STUB.now = STUB.now + 2; STUB.Tick()');
+  assert.equal(vm.evaluate('AzerMind.IsConnected()'), 'true');
+  assert.equal(vm.evaluate('AzerMindInput:GetText()'), '', 'the box clears after sending');
+  assert.equal(stripRecords(vm).filter(r => r.text === 'fix the bug').length, 1);
+});
+
+test('an unanswered hello spends at most three slots and preserves the draft', () => {
+  const vm = newVM();
+  login(vm);
+  nextSlot(vm, '{ now = time() - 2200, replies = {} }');
+  vm.run('STUB.now = STUB.now + 2; STUB.Tick(); AzerMind.Toggle(true)');
+  vm.run(`
+    STUB.loadCount = 0
+    STUB.onLoadAddOn = function() STUB.loadCount = STUB.loadCount + 1 end
+    AzerMindInput:SetText("fix the bug")
+    AzerMind.SendFromInput()
+    for i = 1, 30 do STUB.now = STUB.now + 2; STUB.Tick() end
+  `);
+  assert.equal(vm.num('STUB.loadCount'), 3);
+  assert.ok(vm.evaluate('table.concat(STUB.texts, "|")').includes('No answer from the bridge'));
+  assert.equal(vm.evaluate('AzerMindInput:GetText()'), 'fix the bug');
+  assert.equal(vm.evaluate('AzerMindDB.chats[1].pendingId'), null);
 });
 
 test('without the sound channel, the light stays green between idle slot polls', () => {
@@ -1064,10 +1142,118 @@ test('character context defaults to basic, full includes equipment and preview d
 });
 
 
+test('completed quest context distinguishes delivered quests from the active quest log', () => {
+  const vm = newVM(); login(vm);
+  vm.run(`
+    ACCOUNT_HISTORY_CALLS = 0
+    C_QuestLog = {
+      GetNumQuestLogEntries=function() return 2 end,
+      GetInfo=function(i) return {questID=100+i,isHeader=false} end,
+      IsComplete=function(id) return id==101 end,
+      GetAllCompletedQuestIDs=function() return {99,44,2} end,
+      IsQuestFlaggedCompletedOnAccount=function() ACCOUNT_HISTORY_CALLS=ACCOUNT_HISTORY_CALLS+1; return true end
+    }
+  `);
+  const context = vm.evaluate('AzerMind.GameContext({quests=true})');
+  assert.match(context, /^Quest log \(id, \* = ready to turn in\): 101\*,102\n/);
+  assert.ok(context.includes('Completed quest IDs (delivered; 3/3 shown): 2,44,99'));
+  assert.equal(vm.num('ACCOUNT_HISTORY_CALLS'), 0);
+  assert.equal(vm.evaluate('(function() for _, field in ipairs(AzerMind.ContextCategories) do if field[1]=="quests" then return field[2] end end end)()'), 'Active and completed quest IDs');
+});
+
+test('completed quest context reports unavailable APIs and errors without claiming an empty history', () => {
+  const vm = newVM(); login(vm);
+  for (const api of ['nil', '{}', '{GetAllCompletedQuestIDs=function() error("not ready") end}', '{GetAllCompletedQuestIDs=function() return nil end}', '{GetAllCompletedQuestIDs=function() return "123" end}']) {
+    vm.run(`C_QuestLog=${api}`);
+    const context = vm.evaluate('AzerMind.GameContext({quests=true})');
+    assert.ok(context.includes('Completed quest IDs (delivered; unavailable): client API unavailable or failed.'), api);
+    assert.ok(!context.includes('0/0 shown'), api);
+  }
+});
+
+test('completed quest context labels an empty API result as no reported IDs', () => {
+  const vm = newVM(); login(vm);
+  vm.run('C_QuestLog={GetAllCompletedQuestIDs=function() return {} end}');
+  const context = vm.evaluate('AzerMind.GameContext({quests=true})');
+  assert.ok(context.includes('Completed quest IDs (delivered; 0/0 shown): none reported by client; absence does not prove a quest is unfinished.'));
+  assert.ok(!context.includes('unavailable):'));
+});
+
+test('completed quest context sorts and deduplicates positive integer IDs and rejects invalid entries', () => {
+  const vm = newVM(); login(vm);
+  vm.run(`C_QuestLog={GetAllCompletedQuestIDs=function() return {[1]=99,[3]=2,[4]=44.0,[5]=99,[6]=0,[7]=-1,[8]=1.5,[9]="77",[10]=math.huge,[11]=-math.huge,[12]=0/0,[13]=false,[14]={}} end}`);
+  const context = vm.evaluate('AzerMind.GameContext({quests=true})');
+  assert.ok(context.includes('Completed quest IDs (delivered; partial; 3/3 shown; invalid entries omitted): 2,44,99'));
+});
+
+test('completed quest context bounds large histories with explicit shown and total counts', () => {
+  const vm = newVM(); login(vm);
+  vm.run(`
+    C_QuestLog={GetAllCompletedQuestIDs=function()
+      local ids={}; for i=3000,1,-1 do ids[#ids+1]=100000+i end; return ids
+    end}
+  `);
+  const context = vm.evaluate('AzerMind.GameContext({quests=true})');
+  const history = context.split('\n').find(line => line.startsWith('Completed quest IDs'));
+  assert.ok(history, 'completed history is present');
+  assert.ok(Buffer.byteLength(history) <= 6000);
+  const match = history.match(/^Completed quest IDs \(delivered; partial; (\d+)\/3000 shown; size limit\): ([\d,]+)$/);
+  assert.ok(match, history);
+  const shown = Number(match[1]);
+  assert.ok(shown > 0 && shown < 3000);
+  assert.deepEqual(match[2].split(',').map(Number), Array.from({length:shown}, (_, i) => 100001+i));
+  assert.ok(Buffer.byteLength(context) <= 14000);
+});
+
+test('completed quest context keeps both quest sections ahead of verbose spells and skills', () => {
+  const vm = newVM(); login(vm);
+  vm.run(`
+    C_QuestLog={GetNumQuestLogEntries=function() return 1 end,GetInfo=function() return {questID=101} end,
+      IsComplete=function() return true end,GetAllCompletedQuestIDs=function() return {99} end}
+    C_SkillInfo={GetNumSkillLines=function() return 1 end,
+      GetSkillLineInfo=function() return {name=string.rep("Long skill name ",1100),rank=1,maxRank=300,skillID=43} end}
+    GetNumSpellTabs=function() return 1 end
+    GetSpellTabInfo=function() return "Mage",nil,0,100 end
+    GetSpellBookItemInfo=function(i) return "SPELL",1000+i end
+    GetSpellBookItemName=function(i) return "Long learned spell "..i,"Rank 1" end
+  `);
+  const context = vm.evaluate('AzerMind.GameContext("full")');
+  assert.ok(context.includes('Quest log (id, * = ready to turn in): 101*'));
+  assert.ok(context.includes('Completed quest IDs (delivered; 1/1 shown): 99'));
+  assert.ok(context.includes('[Partial context: trailing sections omitted at size limit.]'));
+  assert.ok(Buffer.byteLength(context) <= 14000);
+  vm.run('C_SkillInfo=nil');
+  const withSpells = vm.evaluate('AzerMind.GameContext("full")');
+  assert.ok(withSpells.indexOf('Completed quest IDs') < withSpells.indexOf('Learned player spells'));
+});
+
+test('completed quest context respects disabled quest sharing and disabled character sharing', () => {
+  const vm = newVM(); login(vm); connect(vm);
+  vm.run('HISTORY_CALLS=0; C_QuestLog={GetAllCompletedQuestIDs=function() HISTORY_CALLS=HISTORY_CALLS+1; return {99} end}');
+  const context = vm.evaluate('AzerMind.GameContext({game=true,quests=false})');
+  assert.ok(!context.includes('Completed quest IDs') && !context.includes('Quest log'));
+  assert.equal(vm.num('HISTORY_CALLS'), 0);
+  vm.run('AzerMind.SaveContextSettings({quests=true}, false); AzerMind.Send("no quest sharing")');
+  const rec = stripRecords(vm).find(r => r.text === 'no quest sharing');
+  assert.ok(rec.ctx === '' || rec.ctx === undefined);
+  assert.equal(vm.num('HISTORY_CALLS'), 0);
+});
+
+test('completed quest context refreshes newly delivered IDs on the next context', () => {
+  const vm = newVM(); login(vm);
+  vm.run('COMPLETED_IDS={99}; C_QuestLog={GetAllCompletedQuestIDs=function() return COMPLETED_IDS end}');
+  assert.ok(vm.evaluate('AzerMind.GameContext({quests=true})').includes('Completed quest IDs (delivered; 1/1 shown): 99'));
+  vm.run('COMPLETED_IDS[2]=101');
+  assert.ok(vm.evaluate('AzerMind.GameContext({quests=true})').includes('Completed quest IDs (delivered; 2/2 shown): 99,101'));
+});
+
 test('full character context reaches bridge intact beside the question', () => {
   const vm = newVM(); login(vm); connect(vm);
+  vm.run('C_QuestLog={GetAllCompletedQuestIDs=function() local ids={}; for i=1,500 do ids[i]=100000+i end; return ids end}');
   vm.run('AzerMind.SetContextMode("full"); AzerMind.Send("compare my character")');
   const expected = vm.evaluate('AzerMind.GameContext()');
+  assert.ok(expected.includes('Completed quest IDs (delivered; 500/500 shown): 100001,'));
+  assert.ok(Buffer.byteLength(expected) > 2000);
   const P = require('../bridge/protocol');
   const assemble = P.createStripAssembler();
   let record;
@@ -1236,6 +1422,44 @@ test('guide references validate atomically and travel independently of character
   assert.equal(vm.evaluate('AzerMind.GuideReferences()'), '');
 });
 
+
+test('guide editor takes keyboard focus, refocuses on blank-area clicks and preserves variant URLs', () => {
+  const vm = newVM(); login(vm);
+  const url = 'https://mobalytics.gg/wow-forever/classes/mage-leveling-guide?ws-ngf5-26=activeVariantId%2C7';
+  vm.run(`
+    AzerMind.CodexPrompt()
+    for _,side in ipairs(AzerMindGeneralSettings.children) do
+      for _,button in ipairs(side.children or {}) do
+        if button.text=="Guide references" then button.scripts.OnClick(button) end
+      end
+    end
+  `);
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'true', 'opening the editor directs paste to the guide field');
+  vm.run(`
+    local input = AzerMindGuideSettings.input
+    input.scripts.OnEscapePressed(input)
+  `);
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'false');
+  vm.run(`
+    local scroll = AzerMindGuideSettings.input:GetParent()
+    if scroll.scripts.OnMouseDown then scroll.scripts.OnMouseDown(scroll, "LeftButton") end
+  `);
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'true', 'clicking the empty scroll surface restores keyboard focus');
+  vm.run(`STUB.focus:Insert(${JSON.stringify(url)}); AzerMindGuideSettings.input.scripts.OnTextChanged()`);
+  assert.equal(vm.evaluate('AzerMindGuideSettings.dirty'), 'true');
+  assert.equal(vm.evaluate('AzerMind.GuideReferences()'), '', 'pasting does not save automatically');
+  vm.run('AzerMindGuideSettings.input:ClearFocus(); AzerMind.ShowGuideSettings()');
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'true', 'reopening an unsaved draft restores focus');
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:GetText()'), url);
+  vm.run('AzerMindGuideSettings.save.scripts.OnClick()');
+  assert.equal(vm.evaluate('AzerMind.GuideReferences()'), url, 'Save keeps the selected build query exactly');
+  vm.run('AzerMindGuideSettings:Hide()');
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'false', 'closing releases the keyboard');
+  vm.run('AzerMind.ShowGuideSettings()');
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:HasFocus()'), 'true');
+  assert.equal(vm.evaluate('AzerMindGuideSettings.input:GetText()'), url);
+  assert.equal(vm.evaluate('AzerMindDB.chats[1].pendingId'), null, 'editing guide settings does not send a chat');
+});
 
 test('provider choices stay isolated and survive outgoing transport', () => {
   const vm = newVM(); login(vm); connect(vm,'agentSettings={claude={model="sonnet",efforts={},models={{model="sonnet",efforts={"high"}}}}},');

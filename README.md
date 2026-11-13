@@ -125,9 +125,13 @@ Models come from local discovery, configured catalogs and bundled compatibility 
 
 ### Character sharing and guides
 
-Under **Settings > Character**, choose game/client, identity, realm/guild, zone, coordinates, money/XP, talent totals, professions, skills, learned spells, quest IDs and equipped items. Use presets and **Preview**, then **Save**. You can disable automatic sharing; manual attachments still form part of your message. Individual talent ranks and pet abilities are not collected. Missing data and size limits are identified. Disabling sharing does not erase previously sent information.
+Under **Settings > Character**, choose game/client, identity, realm/guild, zone, coordinates, money/XP, talent totals, professions, skills, learned spells, quest IDs and equipped items. Quest sharing includes the active log and character completion IDs reported by the client's API. Ready-to-turn-in quests remain active; completed history means already delivered. Missing APIs and partial history are labeled, and absence from the list does not establish quest eligibility. Use presets and **Preview**, then **Save**. You can disable automatic sharing; manual attachments still form part of your message. Individual talent ranks and pet abilities are not collected. Missing data and size limits are identified. Disabling sharing does not erase previously sent information.
 
 Under **Settings > Guide references**, enter one URL per line, up to 20, and save. Links apply to future messages in all conversations independently of character sharing. Agents can read them only if their tools and permissions allow it.
+
+These references inform the AI's answers. For example, link a leveling build for your class and ask what talent to take at your current level. The agent is instructed to read the relevant guide, check the game version, class, specialization and build variant, and follow that progression consistently. It uses shared character facts and your corrections to adapt the advice; recommended talents are not proof of your actual talent ranks. Wowhead Forever remains a reference for quest, item and spell facts, without overriding your chosen build.
+
+Guide pages are not downloaded or bundled by the bridge. Access failures, unavailable tables and conflicting guides should be explained in the answer; the agent may need the relevant excerpt or a choice between builds. A class guide alone does not establish an optimal quest route. This feature uses the existing agent's web tools and still requires the normal AI bridge.
 
 ### Items, quests and instances
 
@@ -212,6 +216,8 @@ The addon uses game addon APIs; the bridge uses screen capture and ordinary file
 Catalog indexes and detail modules load separately on demand. Lists are paginated; first-time Lua loading remains synchronous. Catalogs ship with releases rather than downloading during gameplay. See [architecture](docs/ARCHITECTURE.md), [maps](docs/MAP.md) and [catalog sources/building](CATALOG.md).
 
 ## Troubleshooting
+
+See [Known issues](docs/KNOWN-ISSUES.md) for documented symptoms, diagnostic steps, workarounds and fix status, including Windows messages stuck on **Sending message**.
 
 | Symptom | Check |
 |---|---|

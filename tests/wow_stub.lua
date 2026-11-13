@@ -65,6 +65,8 @@ function Methods.GetName(self) return self.name end
 function Methods.GetParent(self) return self.parent end
 function Methods.GetWidth(self) return self.width or 400 end
 function Methods.GetHeight(self) return self.height or 300 end
+function Methods.SetScale(self, value) self.scale = value end
+function Methods.GetScale(self) return self.scale or 1 end
 function Methods.GetFrameLevel(self) return self.frameLevel or 1 end
 function Methods.SetFrameLevel(self, value) self.frameLevel = value end
 function Methods.SetSize(self, w, h) self.width, self.height = w, h end

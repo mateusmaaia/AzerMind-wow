@@ -290,6 +290,9 @@ function AzerMind.ShowGuideSettings()
 		local input = CreateFrame("EditBox", nil, scroll)
 		input:SetMultiLine(true); input:SetAutoFocus(false); input:SetFontObject("ChatFontNormal")
 		input:SetWidth(524); input:SetHeight(230); input:SetMaxLetters(10000)
+		input:EnableMouse(true); scroll:EnableMouse(true)
+		-- The empty area below the text must focus the editor too.
+		scroll:SetScript("OnMouseDown", function(_, button) if button == "LeftButton" then input:SetFocus() end end)
 		input:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 		scroll:SetScrollChild(input); p.input = input
 		input:SetScript("OnTextChanged",function()
@@ -307,11 +310,11 @@ function AzerMind.ShowGuideSettings()
 		end)
 		Button(p, "X", 26, 554, -14, function() p.input:ClearFocus(); p:Hide() end)
 	end
-	if guidePanel.dirty then guidePanel:Show(); return end
+	if guidePanel.dirty then guidePanel:Show(); guidePanel.input:SetFocus(); return end
 	guidePanel.input:SetText(AzerMind.GuideReferences())
 	guidePanel.input:GetScript("OnTextChanged")(); guidePanel.dirty=false; guidePanel.save:Disable()
 	guidePanel.status:SetText("Changes apply to future messages. Previously shared links remain in chat history.")
-	guidePanel:Show()
+	guidePanel:Show(); guidePanel.input:SetFocus()
 end
 
 function AzerMind.ShowNotificationSettings()

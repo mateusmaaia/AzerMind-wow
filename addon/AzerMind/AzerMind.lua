@@ -39,6 +39,7 @@ local POLL_SCHEDULE = { 5, 10, 16, 24, 34, 46, 60, 80, 100, 130, 160, 200, 240, 
 local POLL_TAIL = 60
 local TICK_SECONDS = 2
 local CONNECT_WAIT = 15 -- seconds the Connect button waits for the bridge before giving up
+local HELLO_POLL_SCHEDULE = { 5, 10, CONNECT_WAIT }
 local IDLE_POLL_SECONDS = 600 -- without the sound channel, spend one slot this often while idle to check the bridge
 local RS, US = "\30", "\31" -- record / unit separators in the strip payload
 
@@ -346,6 +347,20 @@ end
 
 local strip
 local cellPool = {}
+local stripPhysicalHeight
+
+local function UpdateStripScale()
+	if not strip then return end
+	local physH = stripPhysicalHeight or 1080
+	if GetPhysicalScreenSize then
+		local _, h = GetPhysicalScreenSize()
+		if type(h) == "number" and h > 0 and h < math.huge then physH = h end
+	end
+	if physH ~= stripPhysicalHeight then
+		strip:SetScale(768 / physH)
+		stripPhysicalHeight = physH
+	end
+end
 
 local function EnsureStrip()
 	if strip then return strip end
@@ -353,13 +368,8 @@ local function EnsureStrip()
 	strip:SetFrameStrata("TOOLTIP")
 	strip:SetFrameLevel(10000)
 	-- Scale so that one UI unit is exactly one physical pixel (see Blizzard's PixelUtil).
-	local physH = 1080
-	if GetPhysicalScreenSize then
-		local _, h = GetPhysicalScreenSize()
-		physH = h or physH
-	end
 	if strip.SetIgnoreParentScale then strip:SetIgnoreParentScale(true) end
-	strip:SetScale(768 / physH)
+	UpdateStripScale()
 	strip:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
 	strip:SetSize(CELLS_PER_ROW * CELL, MAX_ROWS * CELL)
 	strip:Hide()
@@ -374,6 +384,7 @@ end
 local function ShowStrip(id, payload)
 	local cells = Codec.Encode(id % 65536, payload)
 	local s = EnsureStrip()
+	UpdateStripScale()
 	local rows = math.ceil(#cells / CELLS_PER_ROW)
 	s:SetSize(CELLS_PER_ROW * CELL, rows * CELL)
 	local total = #cells
@@ -886,6 +897,31 @@ function AzerMind.UpdateLatency()
 	ui.latencyDetails = "Home " .. Value(home) .. " / World " .. Value(world) .. " ms"
 end
 
+local function PollHello(now)
+	local hello = run.helloPoll
+	if not hello or now < hello.startedAt + HELLO_POLL_SCHEDULE[hello.index] then return end
+	run.helloPoll = nil
+	-- The deadline poll can fall on the next tick when Connect was clicked
+	-- between ticks. CheckConnection runs after this poll.
+	if now > hello.startedAt + CONNECT_WAIT + TICK_SECONDS then return end
+	-- The first poll can carry a restore or metadata even if a sound file
+	-- already proved the bridge is alive.
+	if hello.index > 1 and run.bridgeSeen and run.bridgeSeen >= hello.startedAt then return end
+	TryLoadSlot("hello")
+	if run.restoring then
+		run.restoring = nil
+		AzerMind.Render()
+	end
+	if run.slotsExhausted or run.slotsMissing or (run.bridgeSeen and run.bridgeSeen >= hello.startedAt) then return end
+	for index = hello.index + 1, #HELLO_POLL_SCHEDULE do
+		if hello.startedAt + HELLO_POLL_SCHEDULE[index] > now then
+			hello.index = index
+			run.helloPoll = hello
+			break
+		end
+	end
+end
+
 local function Tick()
 	if not db then return end
 	local now = GetTime()
@@ -901,19 +937,11 @@ local function Tick()
 		run.lastIdlePoll = now
 		TryLoadSlot("idle")
 	end
+	if db.settings.mode == "pixel" then PollHello(now) end
 	AzerMind.UpdateDot()
 	AzerMind.CheckConnection()
 	if db.settings.mode ~= "pixel" then return end
 	local changed = false
-	if run.helloPollAt and now >= run.helloPollAt then
-		run.helloPollAt = nil
-		TryLoadSlot("hello")
-		-- Whatever that slot held, the wait is over.
-		if run.restoring then
-			run.restoring = nil
-			AzerMind.Render()
-		end
-	end
 	if run.restoring and now - run.restoring > 25 then
 		run.restoring = nil
 		AzerMind.Render()
@@ -1040,6 +1068,7 @@ end
 -- Every game API here is optional: whatever the client lacks is left out.
 
 local CONTEXT_MAX = 14000 -- Fits alongside a 48 KB question in the bounded multipart record.
+local COMPLETED_QUEST_BYTES_MAX = 6000 -- Leave room for active quests and other character fields.
 local LINK_LINES_MAX = 30 -- tooltip lines kept per link
 local LINK_BYTES_MAX = 900 -- bytes kept per link
 
@@ -1141,13 +1170,48 @@ function AzerMind.LearnedSpells()
 	return "Learned player spells (spellbook ranks; no rank means unavailable, not rank 1): " .. table.concat(entries, "; ") .. (truncated and "; [partial list: size limit]" or "")
 end
 
+-- Character completion history is separate from ready-to-turn-in active quests.
+-- Read each context afresh: quests delivered since the last question must appear.
+local function CompletedQuestContext()
+	local reported = Try(C_QuestLog and C_QuestLog.GetAllCompletedQuestIDs)
+	if type(reported) ~= "table" then
+		return "Completed quest IDs (delivered; unavailable): client API unavailable or failed."
+	end
+	local ids, seen, invalid = {}, {}, false
+	for _, id in pairs(reported) do
+		if type(id) == "number" and id > 0 and id < math.huge and id == math.floor(id) then
+			if not seen[id] then ids[#ids + 1] = id; seen[id] = true end
+		else
+			invalid = true
+		end
+	end
+	table.sort(ids)
+	local function Header(shown, limited)
+		return "Completed quest IDs (delivered" .. ((limited or invalid) and "; partial" or "")
+			.. "; " .. shown .. "/" .. #ids .. " shown" .. (limited and "; size limit" or "")
+			.. (invalid and "; invalid entries omitted" or "") .. "): "
+	end
+	-- Reserve the largest header, including the size-limit notice, before adding IDs.
+	-- Counts refer to unique valid IDs; a malformed API entry makes the result partial.
+	local entries, bytes = {}, 0
+	local budget = COMPLETED_QUEST_BYTES_MAX - #Header(#ids, true)
+	for _, id in ipairs(ids) do
+		local entry = string.format("%.0f", id)
+		local size = #entry + (#entries > 0 and 1 or 0)
+		if bytes + size > budget then break end
+		entries[#entries + 1] = entry; bytes = bytes + size
+	end
+	local body = #ids == 0 and "none reported by client; absence does not prove a quest is unfinished." or table.concat(entries, ",")
+	return Header(#entries, #entries < #ids) .. body
+end
+
 AzerMind.ContextCategories = {
 	{"game", "Game and client version"}, {"character", "Name, class, race, level, faction"},
 	{"identity", "Realm and guild (with character)"}, {"zone", "Zone and subzone"},
 	{"position", "Map and exact coordinates"}, {"progress", "Money and XP"},
 	{"talents", "Talent tree totals"}, {"professions", "Professions and levels"},
 	{"skills", "Other skills and levels"}, {"spells", "Learned spells and ranks"},
-	{"quests", "Active quest IDs and completion"}, {"equipment", "Equipped items and tooltips"},
+	{"quests", "Active and completed quest IDs"}, {"equipment", "Equipped items and tooltips"},
 }
 function AzerMind.ContextOptions(mode)
 	local selected = type(mode) == "table" and mode or (mode == nil and db.settings.contextFields)
@@ -1247,6 +1311,31 @@ function AzerMind.GameContext(mode)
 	if #progress > 0 then table.insert(lines, table.concat(progress, "; ")) end
 
 	end -- progress
+	if options.quests then
+	-- Keep active and delivered quest IDs ahead of verbose optional sections so
+	-- dropping trailing context cannot remove the facts needed for route planning.
+	local quests = {}
+	local qn = Try(C_QuestLog and C_QuestLog.GetNumQuestLogEntries) or Try(GetNumQuestLogEntries)
+	if type(qn) == "number" then
+		for i = 1, math.min(qn, 40) do
+			local id, header, complete
+			local info = Try(C_QuestLog and C_QuestLog.GetInfo, i)
+			if type(info) == "table" then
+				id, header = info.questID, info.isHeader
+				complete = Try(C_QuestLog.IsComplete, id)
+			else
+				local _, _, _, isHeader, _, isComplete, _, qid = Try(GetQuestLogTitle, i)
+				id, header, complete = qid, isHeader, isComplete == 1 or isComplete == true
+			end
+			if not header and type(id) == "number" and id > 0 then
+				table.insert(quests, tostring(id) .. (complete and "*" or ""))
+			end
+		end
+	end
+	if #quests > 0 then table.insert(lines, "Quest log (id, * = ready to turn in): " .. table.concat(quests, ","))
+	else table.insert(lines, "Quest log: empty or unavailable from client API.") end
+	table.insert(lines, CompletedQuestContext())
+	end -- quests
 	if options.talents then
 	-- Classic-style talent tabs: name, icon, points spent.
 	local tabs = Try(GetNumTalentTabs)
@@ -1281,30 +1370,6 @@ function AzerMind.GameContext(mode)
 	end -- professions / skills
 	if options.spells then table.insert(lines, AzerMind.LearnedSpells()) end
 
-	if options.quests then
-	-- Quest log ids (what is accepted, and which are done), so route planning can
-	-- skip pickups and turn-ins that no longer apply.
-	local quests = {}
-	local qn = Try(C_QuestLog and C_QuestLog.GetNumQuestLogEntries) or Try(GetNumQuestLogEntries)
-	if type(qn) == "number" then
-		for i = 1, math.min(qn, 40) do
-			local id, header, complete
-			local info = Try(C_QuestLog and C_QuestLog.GetInfo, i)
-			if type(info) == "table" then
-				id, header = info.questID, info.isHeader
-				complete = Try(C_QuestLog.IsComplete, id)
-			else
-				local _, _, _, isHeader, _, isComplete, _, qid = Try(GetQuestLogTitle, i)
-				id, header, complete = qid, isHeader, isComplete == 1 or isComplete == true
-			end
-			if not header and type(id) == "number" and id > 0 then
-				table.insert(quests, tostring(id) .. (complete and "*" or ""))
-			end
-		end
-	end
-	if #quests > 0 then table.insert(lines, "Quest log (id, * = ready to turn in): " .. table.concat(quests, ","))
-	else table.insert(lines, "Quest log: empty or unavailable from client API.") end
-	end -- quests
 	if options.equipment then
 	local equipment = AzerMind.EquipmentDraft(""):gsub("Equipment snapshot taken at [^\n]+", "Currently equipped items (not bag items).")
 	table.insert(lines, (AzerMind.ExpandLinks(equipment)))
@@ -1580,7 +1645,7 @@ function AzerMind.SayHello()
 	local c = ActiveChat()
 	local ctx = SharedContext()
 	run.outbound[db.lastSeq] = { chat = c and c.id or "", cwd = c and c.cwd or "", flags = "h", name = c and c.name or "", text = "", ctx = ctx, sentAt = now, hello = true }
-	run.helloPollAt = now + 5
+	run.helloPoll = { startedAt = now, index = 1 }
 	-- Deletions the bridge never confirmed ride along with the hello.
 	for id in pairs(db.forget) do SendForget(id) end
 	-- Fresh saved data: show "restoring" instead of an empty panel until we hear back.
@@ -4079,6 +4144,9 @@ ev:SetScript("OnEvent", function(self, event, arg1)
 		HookReplyCommand()
 		C_Timer.NewTicker(TICK_SECONDS, Tick)
 		C_Timer.NewTicker(0.75, function()
+			-- Window/display changes can settle after their event. Recalibrate even
+			-- a single-frame message while keeping the existing fragment timer.
+			if run.stripShown then UpdateStripScale() end
 			for id, rec in pairs(run.outbound) do
 				if not rec.acked and #RecordFor(id, rec) > STRIP_PAYLOAD then RefreshStrip(); break end
 			end

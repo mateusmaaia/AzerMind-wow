@@ -400,7 +400,7 @@ function readOutbox() {
 // It is kept in state.json so a restarted bridge still has it, and goes into
 // the agent's system prompt on every run (see protocol.systemPrompt).
 function setContext(job) {
-  const text = String(job.ctx || '').replace(/\r/g, '').trim().slice(0, 2000);
+  const text = P.normalizeGameContext(job.ctx);
   const prev = (state.context && state.context.text) || '';
   if (text === prev) return;
   state.context = text ? { text, at: Date.now(), session: job.session || '' } : null;
