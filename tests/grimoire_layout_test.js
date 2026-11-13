@@ -89,4 +89,3 @@ test('screenshot regressions: scroll gutters clear borders and compact labels ha
     end
   `);
 });
-
