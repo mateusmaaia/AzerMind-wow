@@ -344,6 +344,20 @@ end
 
 local strip
 local cellPool = {}
+local stripPhysicalHeight
+
+local function UpdateStripScale()
+	if not strip then return end
+	local physH = stripPhysicalHeight or 1080
+	if GetPhysicalScreenSize then
+		local _, h = GetPhysicalScreenSize()
+		if type(h) == "number" and h > 0 and h < math.huge then physH = h end
+	end
+	if physH ~= stripPhysicalHeight then
+		strip:SetScale(768 / physH)
+		stripPhysicalHeight = physH
+	end
+end
 
 local function EnsureStrip()
 	if strip then return strip end
@@ -351,13 +365,8 @@ local function EnsureStrip()
 	strip:SetFrameStrata("TOOLTIP")
 	strip:SetFrameLevel(10000)
 	-- Scale so that one UI unit is exactly one physical pixel (see Blizzard's PixelUtil).
-	local physH = 1080
-	if GetPhysicalScreenSize then
-		local _, h = GetPhysicalScreenSize()
-		physH = h or physH
-	end
 	if strip.SetIgnoreParentScale then strip:SetIgnoreParentScale(true) end
-	strip:SetScale(768 / physH)
+	UpdateStripScale()
 	strip:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
 	strip:SetSize(CELLS_PER_ROW * CELL, MAX_ROWS * CELL)
 	strip:Hide()
@@ -372,6 +381,7 @@ end
 local function ShowStrip(id, payload)
 	local cells = Codec.Encode(id % 65536, payload)
 	local s = EnsureStrip()
+	UpdateStripScale()
 	local rows = math.ceil(#cells / CELLS_PER_ROW)
 	s:SetSize(CELLS_PER_ROW * CELL, rows * CELL)
 	local total = #cells
@@ -3886,6 +3896,9 @@ ev:SetScript("OnEvent", function(self, event, arg1)
 		HookReplyCommand()
 		C_Timer.NewTicker(TICK_SECONDS, Tick)
 		C_Timer.NewTicker(0.75, function()
+			-- Window/display changes can settle after their event. Recalibrate even
+			-- a single-frame message while keeping the existing fragment timer.
+			if run.stripShown then UpdateStripScale() end
 			for id, rec in pairs(run.outbound) do
 				if not rec.acked and #RecordFor(id, rec) > STRIP_PAYLOAD then RefreshStrip(); break end
 			end

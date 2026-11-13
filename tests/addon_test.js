@@ -361,6 +361,26 @@ test('hello goes out on the strip after login', () => {
   assert.equal(recs[0].session, vm.evaluate('AzerMindDB.session'));
 });
 
+test('pending pixel strips keep four physical pixels per cell after a window resize', () => {
+  for (const text of ['small', 'x'.repeat(6000)]) {
+    const vm = newVM();
+    login(vm); connect(vm);
+    vm.run(`AzerMind.Send(${JSON.stringify(text)})`);
+    const initial = decodeStrip(vm);
+    assert.ok(initial);
+    assert.ok(Math.abs(vm.num('AzerMindStrip:GetScale()') * 1080 / 768 - 1) < 0.00001);
+    vm.run('GetPhysicalScreenSize = function() return 1765, 993 end; STUB.now = STUB.now + 0.75; STUB.tickers[2]()');
+    assert.ok(Math.abs(vm.num('AzerMindStrip:GetScale()') * 993 / 768 - 1) < 0.00001, 'resize recalibrates a pending strip without a reload');
+    assert.equal(vm.num('AzerMindStrip.textures[1]:GetWidth()'), 4);
+    assert.equal(vm.num('AzerMindStrip:GetWidth()'), 800);
+    assert.ok(decodeStrip(vm), 'payload still decodes');
+    vm.run('GetPhysicalScreenSize = function() return 0, 0 end; STUB.tickers[2]()');
+    assert.ok(Math.abs(vm.num('AzerMindStrip:GetScale()') - 768 / 993) < 0.00001, 'transient zero dimensions keep the last valid scale');
+    vm.run('GetPhysicalScreenSize = function() return 1920, 1080 end; STUB.tickers[2]()');
+    assert.ok(Math.abs(vm.num('AzerMindStrip:GetScale()') * 1080 / 768 - 1) < 0.00001, 'restoring fullscreen recalibrates again');
+  }
+});
+
 test('outbound records replace field separators inside user text', () => {
   const vm = newVM();
   login(vm);
