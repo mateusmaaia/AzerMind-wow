@@ -120,6 +120,10 @@ Under **Settings > Character**, choose game/client, identity, realm/guild, zone,
 
 Under **Settings > Guide references**, enter one URL per line, up to 20, and save. Links apply to future messages in all conversations independently of character sharing. Agents can read them only if their tools and permissions allow it.
 
+These references inform the AI's answers. For example, link a leveling build for your class and ask what talent to take at your current level. The agent is instructed to read the relevant guide, check the game version, class, specialization and build variant, and follow that progression consistently. It uses shared character facts and your corrections to adapt the advice; recommended talents are not proof of your actual talent ranks. Wowhead Forever remains a reference for quest, item and spell facts, without overriding your chosen build.
+
+Guide pages are not downloaded or bundled by the bridge. Access failures, unavailable tables and conflicting guides should be explained in the answer; the agent may need the relevant excerpt or a choice between builds. A class guide alone does not establish an optimal quest route. This feature uses the existing agent's web tools and still requires the normal AI bridge.
+
 ### Items, quests and instances
 
 | Browser | How to use |
