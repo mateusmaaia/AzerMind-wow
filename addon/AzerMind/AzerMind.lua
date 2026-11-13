@@ -1211,7 +1211,7 @@ AzerMind.ContextCategories = {
 	{"position", "Map and exact coordinates"}, {"progress", "Money and XP"},
 	{"talents", "Talent points and ranks"}, {"professions", "Professions and levels"},
 	{"skills", "Other skills and levels"}, {"spells", "Learned spells and ranks"},
-	{"quests", "Active and completed quest IDs"}, {"equipment", "Equipped items and tooltips"},
+	{"quests", "Active and completed quest IDs"}, {"equipment", "Equipment and GearQuest hunts"},
 }
 function AzerMind.ContextOptions(mode)
 	local selected = type(mode) == "table" and mode or (mode == nil and db.settings.contextFields)
@@ -1524,9 +1524,18 @@ function AzerMind.Send(text, allow)
 		return
 	end
 	-- Shift-clicked links become [Name] plus their tooltip, which is what the agent can read.
+	-- Resolve the player's destination before expanded links introduce other names.
+	local gearContext = Try(AzerMind.GearQuestionContext, text)
 	local links
 	text, links = AzerMind.ExpandLinks(text)
 	local limit = 48000
+	if type(gearContext) == "string" and gearContext ~= "" then
+		if #text + #gearContext <= limit then text = text .. gearContext
+		else
+			local omitted = "\n[Addon gear observations omitted: message size limit.]"
+			if #text + #omitted <= limit then text = text .. omitted end
+		end
+	end
 	if #text > limit then
 		AddHistory(c, "system", "Message exceeds the " .. limit .. " byte limit, including linked item tooltips.")
 		AzerMind.Render()

@@ -15,7 +15,7 @@ module.exports=function boot(t) {
   run(fs.readFileSync(path.join(__dirname,'../wow_stub.lua'),'utf8'));
   run('UIParent:SetSize(1920,1080)');
   const folder=path.join(__dirname,'../../addon/AzerMind');
-  for(const f of ['Codec.lua','Inbox.lua','Theme.lua','AzerMind.lua','Links.lua','Settings.lua','Quests.lua','Catalog.lua','Items.lua','InstancesData.lua','Instances.lua'])run(fs.readFileSync(path.join(folder,f),'utf8'),'AzerMind');
+  for(const f of ['Codec.lua','Inbox.lua','Theme.lua','AzerMind.lua','TalentContext.lua','Links.lua','Settings.lua','Quests.lua','Catalog.lua','Auction.lua','Items.lua','InstancesData.lua','Instances.lua','GearQuestContext.lua','JournalContext.lua','GearIntelligence.lua'])run(fs.readFileSync(path.join(folder,f),'utf8'),'AzerMind');
   run('STUB.FireEvent("ADDON_LOADED","AzerMind"); STUB.FireEvent("PLAYER_LOGIN"); AzerMind.Toggle(true)');
   return {run,value,num:expr=>Number(value(expr))};
 };

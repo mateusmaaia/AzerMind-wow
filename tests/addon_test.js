@@ -45,6 +45,26 @@ test('grimoire materials reach actual chat widgets and repeat at native size on 
   assert.equal(vm.evaluate('AzerMindTheme.PaperText("|cffd3b66f|Hitem:6265|h[Soul Shard]|h|r")'),'|cff765013|Hitem:6265|h[Soul Shard]|h|r');
 });
 
+test('send attaches per-question addon evidence resolved before tooltip expansion',()=>{
+  const vm=newVM(); login(vm); connect(vm);
+  vm.run(`
+    AzerMind.GearQuestionContext=function(text) RAW_GEAR_QUERY=text; return "\\n\\n--- Addon gear observations ---\\nFixture item 123 from boss." end
+    AzerMind.ExpandLinks=function(text) return text.." [expanded tooltip]",1 end
+    AzerMind.Send("Vou RFD: GearQuest?")
+    SENT_TEXT=AzerMindDB.chats[1].history[#AzerMindDB.chats[1].history].text
+  `);
+  assert.equal(vm.evaluate('RAW_GEAR_QUERY'),'Vou RFD: GearQuest?');
+  assert.match(vm.evaluate('SENT_TEXT'),/\[expanded tooltip\][\s\S]*Fixture item 123 from boss/);
+  assert.equal(Buffer.from(vm.evaluate('AzerMindDB.outbox.text'),'hex').toString(),vm.evaluate('SENT_TEXT'));
+});
+
+test('an integration failure does not block an ordinary outgoing question',()=>{
+  const vm=newVM(); login(vm); connect(vm);
+  vm.run('AzerMind.GearQuestionContext=function() error("adapter fault") end; AzerMind.Send("ola")');
+  assert.ok(vm.num('AzerMindDB.chats[1].pendingId')>0);
+  assert.equal(Buffer.from(vm.evaluate('AzerMindDB.outbox.text'),'hex').toString(),'ola');
+});
+
 test('quest location dropdowns cascade in both tabs and preserve hidden selections',()=>{
   const vm=newVM(); login(vm);
   vm.run(`
@@ -167,7 +187,7 @@ function newVM() {
   };
   const num = (expr) => Number(evaluate(expr));
   run(fs.readFileSync(path.join(__dirname, 'wow_stub.lua'), 'utf8'));
-  for (const f of ['Codec.lua', 'Inbox.lua', 'Theme.lua', 'AzerMind.lua', 'TalentContext.lua', 'Links.lua', 'Settings.lua', 'Quests.lua', 'Catalog.lua', 'Items.lua', 'InstancesData.lua', 'Instances.lua']) run(fs.readFileSync(path.join(ADDON, f), 'utf8'), 'AzerMind');
+  for (const f of ['Codec.lua', 'Inbox.lua', 'Theme.lua', 'AzerMind.lua', 'TalentContext.lua', 'Links.lua', 'Settings.lua', 'Quests.lua', 'Catalog.lua', 'Auction.lua', 'Items.lua', 'InstancesData.lua', 'Instances.lua', 'GearQuestContext.lua', 'JournalContext.lua', 'GearIntelligence.lua']) run(fs.readFileSync(path.join(ADDON, f), 'utf8'), 'AzerMind');
   return { run, evaluate, num };
 }
 
@@ -697,7 +717,17 @@ test('an unanswered hello spends at most three slots and preserves the draft', (
     for i = 1, 30 do STUB.now = STUB.now + 2; STUB.Tick() end
   `);
   assert.equal(vm.num('STUB.loadCount'), 3);
-  assert.ok(vm.evaluate('table.concat(STUB.texts, "|")').includes('No answer from the bridge'));
+  // Grimoire keeps the status compact; the indicator tooltip carries diagnostics.
+  vm.run(`
+    for _,holder in ipairs(AzerMindFrame.children) do
+      for _,texture in ipairs(holder.textures or {}) do
+        if type(texture.tip)=="string" and texture.tip:find("No answer from the bridge",1,true) then
+          holder:GetScript("OnEnter")(holder)
+        end
+      end
+    end
+  `);
+  assert.match(vm.evaluate('GameTooltip:GetText()'), /No answer from the bridge/);
   assert.equal(vm.evaluate('AzerMindInput:GetText()'), 'fix the bug');
   assert.equal(vm.evaluate('AzerMindDB.chats[1].pendingId'), null);
 });
