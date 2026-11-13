@@ -60,12 +60,13 @@ function png(width, height, rgb) {
 }
 
 // Pure-primary cells, random noise, and a gamma curve like the in-game sliders.
-function render(cells, jitter, gamma) {
+function render(cells, jitter, gamma, levels) {
   const W = CELLS * CELL, H = Math.ceil(cells.length / CELLS) * CELL;
   const rgb = Buffer.alloc(W * H * 3, 0x30);
   cells.forEach((v, i) => {
     const c = i % CELLS, r = Math.floor(i / CELLS);
-    const lv = [Math.floor(v / 4) % 2, Math.floor(v / 2) % 2, v % 2].map(l => l * 255);
+    const lv = [Math.floor(v / 4) % 2, Math.floor(v / 2) % 2, v % 2]
+      .map((bit, channel) => levels ? levels[channel][bit] : bit * 255);
     for (let y = 0; y < CELL; y++) for (let x = 0; x < CELL; x++) {
       const o = ((r * CELL + y) * W + (c * CELL + x)) * 3;
       for (let k = 0; k < 3; k++) {
@@ -98,17 +99,55 @@ const cases = [
   { id: 9, payload: 'sess1\x1Fchat1\x1F9\x1FC:\\x\x1F\x1F\x1F' + 'a fairly long paste: '.repeat(140), jitter: 100, gamma: 1.8 },
   { id: 65000, payload: '\x1F\x1F\x1F\x1F\x1F\x1Fx', jitter: 120, gamma: 1 },
 ];
+const dimLevels = [[0, 64], [0, 64], [0, 64]];
+if (process.platform === 'win32') {
+  cases.push(
+  { id: 27, payload: 'x'.repeat(2225), levels: dimLevels },
+  { id: 28, payload: 'Canal azul, verde e vermelho — nível variável.', levels: [[6, 44], [75, 172], [36, 106]] },
+  );
+}
 
 let pass = 0, total = 0;
 for (const t of cases) {
   const cells = encodeWithLua(t.id, t.payload);
   const file = path.join(TMP, `strip_${t.id}.png`);
-  fs.writeFileSync(file, render(cells, t.jitter, t.gamma));
+  fs.writeFileSync(file, render(cells, t.jitter, t.gamma, t.levels));
   for (const [name, res] of decode(file)) {
     total++;
     const ok = res.id === t.id && res.text === t.payload;
     if (ok) pass++;
-    console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  id=${t.id}  bytes=${Buffer.byteLength(t.payload)}  cells=${cells.length}  rows=${Math.ceil(cells.length / CELLS)}  noise=±${t.jitter} gamma=${t.gamma}` + (ok ? '' : `\n   got ${JSON.stringify(res).slice(0, 200)}`));
+    const rendering = t.levels ? 'scaled RGB levels' : `noise=±${t.jitter} gamma=${t.gamma}`;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  id=${t.id}  bytes=${Buffer.byteLength(t.payload)}  cells=${cells.length}  rows=${Math.ceil(cells.length / CELLS)}  ${rendering}` + (ok ? '' : `\n   got ${JSON.stringify(res).slice(0, 200)}`));
+  }
+}
+
+const corruptChecksum = encodeWithLua(21, 'checksum');
+corruptChecksum[16] ^= 1; // Flip a payload bit after the six-byte header.
+const corruptMagic = encodeWithLua(22, 'magic');
+corruptMagic[0] ^= 1;
+const invalid = [
+  { name: 'checksum', cells: corruptChecksum, error: 'checksum' },
+  { name: 'magic', cells: corruptMagic, error: 'no valid strip in image' },
+  { name: 'length', cells: encodeWithLua(23, 'x'.repeat(7200)).slice(0, CELLS), error: 'length' },
+];
+if (process.platform === 'win32') {
+  const corruptFinalMagicBit = encodeWithLua(25, 'magic');
+  corruptFinalMagicBit[5] ^= 4;
+  invalid.push(
+    { name: 'truncated', cells: encodeWithLua(24, 'x'.repeat(72)).slice(0, CELLS), error: 'truncated' },
+    { name: 'dim checksum', cells: corruptChecksum, levels: dimLevels, error: 'checksum' },
+    { name: 'dim magic', cells: corruptFinalMagicBit, levels: dimLevels, error: 'no valid strip in image' },
+    { name: 'low contrast', cells: encodeWithLua(26, 'contrast'), levels: [[12, 17], [12, 17], [12, 17]], error: 'no valid strip in image' },
+  );
+}
+for (const t of invalid) {
+  const file = path.join(TMP, `strip_${t.name}.png`);
+  fs.writeFileSync(file, render(t.cells, 0, 1, t.levels));
+  for (const [name, res] of decode(file)) {
+    total++;
+    const ok = res.error === t.error && res.id === undefined && res.text === undefined;
+    if (ok) pass++;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  rejects ${t.name}` + (ok ? '' : `\n   got ${JSON.stringify(res).slice(0, 200)}`));
   }
 }
 console.log(pass === total ? '>>> CODEC ROUND-TRIP PASS' : '>>> CODEC ROUND-TRIP FAIL');

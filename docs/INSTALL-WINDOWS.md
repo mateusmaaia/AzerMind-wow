@@ -179,6 +179,8 @@ or type `azermind.cmd` instead, which bypasses the policy.
 
 **The light stays red / "no sign of the bridge".** The bridge can't see the strip in the top-left corner of the game window. In order of likelihood: the game is in exclusive fullscreen (switch to windowed or borderless); the game window is minimized or on a monitor the bridge can't capture; `capture.processName` in the config doesn't match your game exe (`Wow` for Forever; `setup.js` sets it from the exe it finds). `bridge\bridge.log` prints `attached to '...'` when it finds the window and `strip #N` when it decodes a message.
 
+**The addon stays on Sending message.** See [the Windows sending stall](KNOWN-ISSUES.md#sending-message-stalls-on-windows) for diagnosis and recovery.
+
 **Windows Defender or another antivirus complains about the slot files.** They are 15,000 empty or 124-byte files; nothing runs from them. Exclude `Interface\AddOns` if the scanner slows the bridge's writes down.
 
 **Everything else** is in the README's Troubleshooting section and in `/azermind diag` in game.
