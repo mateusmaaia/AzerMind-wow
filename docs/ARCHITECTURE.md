@@ -77,6 +77,8 @@ AzerMind_SlotData = {
 
 The addon loads a fresh slot on a schedule after each send (5, 10, 16, 24, 34, 46, 60, 80, 100, 130, 160, 200, 240, 300 s, then every 60 s) or immediately when the readiness signal fires. A slot poll matches replies by `(chat, id)` against each chat's pending message. `now` lets the addon know when the bridge last wrote anything (the two clocks are the same machine).
 
+Connection hellos also use bounded slot polling. If the first read still contains an older bridge snapshot, the addon checks again within the connection window instead of waiting for the next idle poll. This matters when a large context takes several pixel frames to arrive and the sound-file channel is unavailable. Fresh bridge evidence ends the retry sequence; a missing bridge still times out without consuming slots indefinitely or discarding the player's draft.
+
 The same content is written to `AzerMind/Inbox.lua`, which the game reads on `/reload` — the fallback path and the only path in `mode reload`.
 
 ## Signals: the empty-wav trick

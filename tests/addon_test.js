@@ -593,6 +593,64 @@ test('a message sent while disconnected goes out by itself once the bridge answe
   assert.equal(stripRecords(vm).filter(r => r.text === 'fix the bug').length, 1);
 });
 
+for (const trigger of ['login', 'Connect']) {
+  test(`a delayed bridge answer connects after the first ${trigger} hello slot was stale`, () => {
+    const vm = newVM();
+    // Forever can report even empty sound files as playable.
+    vm.run('PlaySoundFile = function() return true, 1 end');
+    login(vm);
+    nextSlot(vm, '{ now = time() - 2200, replies = {} }');
+    vm.run('STUB.now = STUB.now + 2; STUB.Tick()'); // Initial idle poll.
+    if (trigger === 'login') vm.run('STUB.RunTimers()');
+    else vm.run('AzerMind.Connect()');
+    vm.run('for i = 1, 3 do STUB.now = STUB.now + 2; STUB.Tick() end');
+    assert.equal(vm.evaluate('AzerMind.IsConnected()'), 'false', 'the first hello slot was stale');
+
+    nextSlot(vm, '{ now = time(), replies = {} }');
+    vm.run('for i = 1, 2 do STUB.now = STUB.now + 2; STUB.Tick() end');
+    assert.equal(vm.evaluate('AzerMind.IsConnected()'), 'true', 'the next hello slot sees the bridge');
+    vm.run('STUB.onLoadAddOn = function() error("hello polled after the fresh reply") end');
+    vm.run('for i = 1, 5 do STUB.now = STUB.now + 2; STUB.Tick() end');
+  });
+}
+
+test('the final hello poll keeps the queued message until the bridge answers', () => {
+  const vm = newVM();
+  login(vm);
+  nextSlot(vm, '{ now = time() - 2200, replies = {} }');
+  vm.run('STUB.now = STUB.now + 2; STUB.Tick(); AzerMind.Toggle(true)');
+  vm.run('AzerMindInput:SetText("fix the bug"); AzerMind.SendFromInput()');
+  vm.run('for i = 1, 7 do STUB.now = STUB.now + 2; STUB.Tick() end');
+  assert.equal(vm.evaluate('AzerMindDB.chats[1].pendingId'), null);
+  assert.equal(vm.evaluate('AzerMindInput:GetText()'), 'fix the bug');
+
+  // The next tick is 16 seconds after Connect. A reply arriving within the
+  // 15-second window still needs to be read before timing out the draft.
+  nextSlot(vm, '{ now = time() - 1, replies = {} }');
+  vm.run('STUB.now = STUB.now + 2; STUB.Tick()');
+  assert.equal(vm.evaluate('AzerMind.IsConnected()'), 'true');
+  assert.equal(vm.evaluate('AzerMindInput:GetText()'), '', 'the box clears after sending');
+  assert.equal(stripRecords(vm).filter(r => r.text === 'fix the bug').length, 1);
+});
+
+test('an unanswered hello spends at most three slots and preserves the draft', () => {
+  const vm = newVM();
+  login(vm);
+  nextSlot(vm, '{ now = time() - 2200, replies = {} }');
+  vm.run('STUB.now = STUB.now + 2; STUB.Tick(); AzerMind.Toggle(true)');
+  vm.run(`
+    STUB.loadCount = 0
+    STUB.onLoadAddOn = function() STUB.loadCount = STUB.loadCount + 1 end
+    AzerMindInput:SetText("fix the bug")
+    AzerMind.SendFromInput()
+    for i = 1, 30 do STUB.now = STUB.now + 2; STUB.Tick() end
+  `);
+  assert.equal(vm.num('STUB.loadCount'), 3);
+  assert.ok(vm.evaluate('table.concat(STUB.texts, "|")').includes('No answer from the bridge'));
+  assert.equal(vm.evaluate('AzerMindInput:GetText()'), 'fix the bug');
+  assert.equal(vm.evaluate('AzerMindDB.chats[1].pendingId'), null);
+});
+
 test('without the sound channel, the light stays green between idle slot polls', () => {
   // The stub has no ctl/valid.wav, so the login self-test disables the sound
   // channel: the addon is in "slot checks only" mode, like a client whose

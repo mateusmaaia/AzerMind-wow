@@ -39,6 +39,7 @@ local POLL_SCHEDULE = { 5, 10, 16, 24, 34, 46, 60, 80, 100, 130, 160, 200, 240, 
 local POLL_TAIL = 60
 local TICK_SECONDS = 2
 local CONNECT_WAIT = 15 -- seconds the Connect button waits for the bridge before giving up
+local HELLO_POLL_SCHEDULE = { 5, 10, CONNECT_WAIT }
 local IDLE_POLL_SECONDS = 600 -- without the sound channel, spend one slot this often while idle to check the bridge
 local RS, US = "\30", "\31" -- record / unit separators in the strip payload
 
@@ -877,6 +878,31 @@ function AzerMind.UpdateLatency()
 	ui.latency:SetText("Home " .. Value(home) .. " / World " .. Value(world) .. " ms")
 end
 
+local function PollHello(now)
+	local hello = run.helloPoll
+	if not hello or now < hello.startedAt + HELLO_POLL_SCHEDULE[hello.index] then return end
+	run.helloPoll = nil
+	-- The deadline poll can fall on the next tick when Connect was clicked
+	-- between ticks. CheckConnection runs after this poll.
+	if now > hello.startedAt + CONNECT_WAIT + TICK_SECONDS then return end
+	-- The first poll can carry a restore or metadata even if a sound file
+	-- already proved the bridge is alive.
+	if hello.index > 1 and run.bridgeSeen and run.bridgeSeen >= hello.startedAt then return end
+	TryLoadSlot("hello")
+	if run.restoring then
+		run.restoring = nil
+		AzerMind.Render()
+	end
+	if run.slotsExhausted or run.slotsMissing or (run.bridgeSeen and run.bridgeSeen >= hello.startedAt) then return end
+	for index = hello.index + 1, #HELLO_POLL_SCHEDULE do
+		if hello.startedAt + HELLO_POLL_SCHEDULE[index] > now then
+			hello.index = index
+			run.helloPoll = hello
+			break
+		end
+	end
+end
+
 local function Tick()
 	if not db then return end
 	local now = GetTime()
@@ -892,19 +918,11 @@ local function Tick()
 		run.lastIdlePoll = now
 		TryLoadSlot("idle")
 	end
+	if db.settings.mode == "pixel" then PollHello(now) end
 	AzerMind.UpdateDot()
 	AzerMind.CheckConnection()
 	if db.settings.mode ~= "pixel" then return end
 	local changed = false
-	if run.helloPollAt and now >= run.helloPollAt then
-		run.helloPollAt = nil
-		TryLoadSlot("hello")
-		-- Whatever that slot held, the wait is over.
-		if run.restoring then
-			run.restoring = nil
-			AzerMind.Render()
-		end
-	end
 	if run.restoring and now - run.restoring > 25 then
 		run.restoring = nil
 		AzerMind.Render()
@@ -1608,7 +1626,7 @@ function AzerMind.SayHello()
 	local c = ActiveChat()
 	local ctx = SharedContext()
 	run.outbound[db.lastSeq] = { chat = c and c.id or "", cwd = c and c.cwd or "", flags = "h", name = c and c.name or "", text = "", ctx = ctx, sentAt = now, hello = true }
-	run.helloPollAt = now + 5
+	run.helloPoll = { startedAt = now, index = 1 }
 	-- Deletions the bridge never confirmed ride along with the hello.
 	for id in pairs(db.forget) do SendForget(id) end
 	-- Fresh saved data: show "restoring" instead of an empty panel until we hear back.
