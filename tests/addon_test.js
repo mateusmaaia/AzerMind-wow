@@ -1033,10 +1033,118 @@ test('character context defaults to basic, full includes equipment and preview d
 });
 
 
+test('completed quest context distinguishes delivered quests from the active quest log', () => {
+  const vm = newVM(); login(vm);
+  vm.run(`
+    ACCOUNT_HISTORY_CALLS = 0
+    C_QuestLog = {
+      GetNumQuestLogEntries=function() return 2 end,
+      GetInfo=function(i) return {questID=100+i,isHeader=false} end,
+      IsComplete=function(id) return id==101 end,
+      GetAllCompletedQuestIDs=function() return {99,44,2} end,
+      IsQuestFlaggedCompletedOnAccount=function() ACCOUNT_HISTORY_CALLS=ACCOUNT_HISTORY_CALLS+1; return true end
+    }
+  `);
+  const context = vm.evaluate('AzerMind.GameContext({quests=true})');
+  assert.match(context, /^Quest log \(id, \* = ready to turn in\): 101\*,102\n/);
+  assert.ok(context.includes('Completed quest IDs (delivered; 3/3 shown): 2,44,99'));
+  assert.equal(vm.num('ACCOUNT_HISTORY_CALLS'), 0);
+  assert.equal(vm.evaluate('(function() for _, field in ipairs(AzerMind.ContextCategories) do if field[1]=="quests" then return field[2] end end end)()'), 'Active and completed quest IDs');
+});
+
+test('completed quest context reports unavailable APIs and errors without claiming an empty history', () => {
+  const vm = newVM(); login(vm);
+  for (const api of ['nil', '{}', '{GetAllCompletedQuestIDs=function() error("not ready") end}', '{GetAllCompletedQuestIDs=function() return nil end}', '{GetAllCompletedQuestIDs=function() return "123" end}']) {
+    vm.run(`C_QuestLog=${api}`);
+    const context = vm.evaluate('AzerMind.GameContext({quests=true})');
+    assert.ok(context.includes('Completed quest IDs (delivered; unavailable): client API unavailable or failed.'), api);
+    assert.ok(!context.includes('0/0 shown'), api);
+  }
+});
+
+test('completed quest context labels an empty API result as no reported IDs', () => {
+  const vm = newVM(); login(vm);
+  vm.run('C_QuestLog={GetAllCompletedQuestIDs=function() return {} end}');
+  const context = vm.evaluate('AzerMind.GameContext({quests=true})');
+  assert.ok(context.includes('Completed quest IDs (delivered; 0/0 shown): none reported by client; absence does not prove a quest is unfinished.'));
+  assert.ok(!context.includes('unavailable):'));
+});
+
+test('completed quest context sorts and deduplicates positive integer IDs and rejects invalid entries', () => {
+  const vm = newVM(); login(vm);
+  vm.run(`C_QuestLog={GetAllCompletedQuestIDs=function() return {[1]=99,[3]=2,[4]=44.0,[5]=99,[6]=0,[7]=-1,[8]=1.5,[9]="77",[10]=math.huge,[11]=-math.huge,[12]=0/0,[13]=false,[14]={}} end}`);
+  const context = vm.evaluate('AzerMind.GameContext({quests=true})');
+  assert.ok(context.includes('Completed quest IDs (delivered; partial; 3/3 shown; invalid entries omitted): 2,44,99'));
+});
+
+test('completed quest context bounds large histories with explicit shown and total counts', () => {
+  const vm = newVM(); login(vm);
+  vm.run(`
+    C_QuestLog={GetAllCompletedQuestIDs=function()
+      local ids={}; for i=3000,1,-1 do ids[#ids+1]=100000+i end; return ids
+    end}
+  `);
+  const context = vm.evaluate('AzerMind.GameContext({quests=true})');
+  const history = context.split('\n').find(line => line.startsWith('Completed quest IDs'));
+  assert.ok(history, 'completed history is present');
+  assert.ok(Buffer.byteLength(history) <= 6000);
+  const match = history.match(/^Completed quest IDs \(delivered; partial; (\d+)\/3000 shown; size limit\): ([\d,]+)$/);
+  assert.ok(match, history);
+  const shown = Number(match[1]);
+  assert.ok(shown > 0 && shown < 3000);
+  assert.deepEqual(match[2].split(',').map(Number), Array.from({length:shown}, (_, i) => 100001+i));
+  assert.ok(Buffer.byteLength(context) <= 14000);
+});
+
+test('completed quest context keeps both quest sections ahead of verbose spells and skills', () => {
+  const vm = newVM(); login(vm);
+  vm.run(`
+    C_QuestLog={GetNumQuestLogEntries=function() return 1 end,GetInfo=function() return {questID=101} end,
+      IsComplete=function() return true end,GetAllCompletedQuestIDs=function() return {99} end}
+    C_SkillInfo={GetNumSkillLines=function() return 1 end,
+      GetSkillLineInfo=function() return {name=string.rep("Long skill name ",1100),rank=1,maxRank=300,skillID=43} end}
+    GetNumSpellTabs=function() return 1 end
+    GetSpellTabInfo=function() return "Mage",nil,0,100 end
+    GetSpellBookItemInfo=function(i) return "SPELL",1000+i end
+    GetSpellBookItemName=function(i) return "Long learned spell "..i,"Rank 1" end
+  `);
+  const context = vm.evaluate('AzerMind.GameContext("full")');
+  assert.ok(context.includes('Quest log (id, * = ready to turn in): 101*'));
+  assert.ok(context.includes('Completed quest IDs (delivered; 1/1 shown): 99'));
+  assert.ok(context.includes('[Partial context: trailing sections omitted at size limit.]'));
+  assert.ok(Buffer.byteLength(context) <= 14000);
+  vm.run('C_SkillInfo=nil');
+  const withSpells = vm.evaluate('AzerMind.GameContext("full")');
+  assert.ok(withSpells.indexOf('Completed quest IDs') < withSpells.indexOf('Learned player spells'));
+});
+
+test('completed quest context respects disabled quest sharing and disabled character sharing', () => {
+  const vm = newVM(); login(vm); connect(vm);
+  vm.run('HISTORY_CALLS=0; C_QuestLog={GetAllCompletedQuestIDs=function() HISTORY_CALLS=HISTORY_CALLS+1; return {99} end}');
+  const context = vm.evaluate('AzerMind.GameContext({game=true,quests=false})');
+  assert.ok(!context.includes('Completed quest IDs') && !context.includes('Quest log'));
+  assert.equal(vm.num('HISTORY_CALLS'), 0);
+  vm.run('AzerMind.SaveContextSettings({quests=true}, false); AzerMind.Send("no quest sharing")');
+  const rec = stripRecords(vm).find(r => r.text === 'no quest sharing');
+  assert.ok(rec.ctx === '' || rec.ctx === undefined);
+  assert.equal(vm.num('HISTORY_CALLS'), 0);
+});
+
+test('completed quest context refreshes newly delivered IDs on the next context', () => {
+  const vm = newVM(); login(vm);
+  vm.run('COMPLETED_IDS={99}; C_QuestLog={GetAllCompletedQuestIDs=function() return COMPLETED_IDS end}');
+  assert.ok(vm.evaluate('AzerMind.GameContext({quests=true})').includes('Completed quest IDs (delivered; 1/1 shown): 99'));
+  vm.run('COMPLETED_IDS[2]=101');
+  assert.ok(vm.evaluate('AzerMind.GameContext({quests=true})').includes('Completed quest IDs (delivered; 2/2 shown): 99,101'));
+});
+
 test('full character context reaches bridge intact beside the question', () => {
   const vm = newVM(); login(vm); connect(vm);
+  vm.run('C_QuestLog={GetAllCompletedQuestIDs=function() local ids={}; for i=1,500 do ids[i]=100000+i end; return ids end}');
   vm.run('AzerMind.SetContextMode("full"); AzerMind.Send("compare my character")');
   const expected = vm.evaluate('AzerMind.GameContext()');
+  assert.ok(expected.includes('Completed quest IDs (delivered; 500/500 shown): 100001,'));
+  assert.ok(Buffer.byteLength(expected) > 2000);
   const P = require('../bridge/protocol');
   const assemble = P.createStripAssembler();
   let record;

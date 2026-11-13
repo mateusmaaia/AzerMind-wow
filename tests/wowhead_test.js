@@ -26,3 +26,13 @@ test('lookup candidates are bounded and reject nonpositive IDs', () => {
   assert.equal(result.match(/https:\/\//g).length,20);
   assert.ok(!result.includes('item=0'));
 });
+
+test('Forever advice uses delivered quest history without treating log objectives as turn-ins', () => {
+  const snapshot = context + '\nQuest log (id, * = ready to turn in): 5561*\nCompleted quest IDs (delivered; 3 reported): 1104,1105,1110';
+  const prompt = P.systemPrompt(snapshot, '');
+  assert.ok(prompt.includes(snapshot), 'the actual character history reaches the agent');
+  assert.ok(!prompt.includes('Completed-quest history and all unlock requirements are not currently supplied'), 'instructions must not contradict the supplied history');
+  assert.match(prompt, /Do not recommend picking up or completing quest IDs reported as delivered/);
+  assert.match(prompt, /ready to turn in.*not.*delivered/i);
+  assert.match(prompt, /partial|unavailable/i);
+});

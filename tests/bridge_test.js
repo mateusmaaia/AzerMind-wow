@@ -4,7 +4,81 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
+const { spawnSync } = require('child_process');
 const P = require('../bridge/protocol');
+
+// Run the real context persistence path with an isolated bridge/config/game tree.
+// A deliberately absent project makes the job exit before launching any agent.
+function contextBridge(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'azermind-context-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const bridge = path.join(dir, 'bridge');
+  const addonDir = path.join(dir, 'AddOns');
+  const saved = path.join(dir, 'SavedVariables.lua');
+  fs.mkdirSync(bridge);
+  fs.mkdirSync(path.join(addonDir, 'AzerMind'), { recursive: true });
+  for (const file of fs.readdirSync(path.join(__dirname, '..', 'bridge'))) {
+    if (file.endsWith('.js')) fs.copyFileSync(path.join(__dirname, '..', 'bridge', file), path.join(bridge, file));
+  }
+  fs.writeFileSync(path.join(bridge, 'config.json'), JSON.stringify({
+    addonDir, savedVariablesFile: saved, defaultCwd: path.join(dir, 'absent-project'),
+    capture: { enabled: false }, primerFile: '', slots: 1, actMax: 1,
+  }));
+  let id = 0;
+  return ctx => {
+    fs.writeFileSync(saved, `AzerMindDB = { ["outbox"] = { ["id"] = ${++id}, ["session"] = "fixture", ["text"] = "74657374", ["ctx"] = "${Buffer.from(ctx, 'utf8').toString('hex')}" } }`);
+    const result = spawnSync(process.execPath, [path.join(bridge, 'bridge.js'), '--once'], {
+      cwd: dir, encoding: 'utf8', timeout: 10000,
+      env: { ...process.env, AZERMIND_PROJECT: path.join(dir, 'absent-project') },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout, /cwd does not exist:/, 'fixture exits before an agent can run');
+    return JSON.parse(fs.readFileSync(path.join(bridge, 'state.json'), 'utf8')).context;
+  };
+}
+
+test('bridge persists quest and equipment context after 2000 characters, then clears it', t => {
+  const receive = contextBridge(t);
+  const ctx = 'Character: Testchar, level 31 Mage\nSpellbook: ' + '116, 133, '.repeat(350)
+    + '\nQuest log: 1001 active; 1002 ready to turn in\nEquipment: staff 2030';
+  assert.ok(ctx.indexOf('Quest log:') > 2000);
+  assert.ok(Buffer.byteLength(ctx, 'utf8') < 14000);
+  const stored = receive(ctx);
+  assert.equal(stored.text, ctx);
+  assert.equal(stored.session, 'fixture');
+  assert.equal(receive(''), null, 'context off clears the persisted text');
+});
+
+test('normalizeGameContext preserves the full supported UTF-8 budget and normalizes whitespace', () => {
+  const ctx = 'á'.repeat(7000);
+  assert.equal(P.normalizeGameContext(' \r\n' + ctx + '\r\n '), ctx);
+  assert.equal(P.normalizeGameContext('A\r\nB'), 'A\nB');
+  for (const empty of ['', ' \r\n ', undefined, null]) assert.equal(P.normalizeGameContext(empty), '');
+});
+
+test('normalizeGameContext drops incomplete trailing lines and explicitly marks oversized context', () => {
+  const header = 'Character: Testchar, level 31 Mage\nQuest history: complete; IDs: 1, 2, 3';
+  const normalized = P.normalizeGameContext(header + '\nSpellbook: ' + 'á😀'.repeat(4000));
+  assert.equal(normalized.split('\n').slice(0, -1).join('\n'), header);
+  assert.match(normalized, /\n\[Game context partial:.*14000 UTF-8 bytes\.\]$/);
+  assert.ok(Buffer.byteLength(normalized, 'utf8') <= 14000);
+});
+
+test('normalizeGameContext truncates a single oversized line without splitting UTF-8 characters', () => {
+  for (const char of ['á', '漢', '😀']) {
+    const ctx = 'Character: ' + char.repeat(15000);
+    const normalized = P.normalizeGameContext(ctx);
+    const [prefix, marker] = normalized.split('\n');
+    assert.ok(ctx.startsWith(prefix));
+    assert.ok(prefix.length > 2000, 'retains useful context from a long first line');
+    assert.ok(!prefix.includes('\uFFFD'), 'no replacement character from a split UTF-8 sequence');
+    assert.equal(Buffer.from(prefix, 'utf8').toString('utf8'), prefix, 'no split surrogate pair');
+    assert.match(marker, /^\[Game context partial:/);
+    assert.ok(Buffer.byteLength(normalized, 'utf8') <= 14000);
+  }
+});
 
 test('luaStr escapes everything Lua 5.1 needs', () => {
   assert.equal(P.luaStr('a"b\\c\nd\re\x01'), '"a\\"b\\\\c\\nde\\001"');

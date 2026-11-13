@@ -109,6 +109,23 @@ function sameFolder(a, b) {
 // In: what the game sends
 // ---------------------------------------------------------------------------
 
+// Match the addon's GameContext byte budget, including an explicit notice when
+// an oversized record loses data. Prefer complete lines so partial quest IDs or
+// equipment entries do not look like complete facts in the agent's prompt.
+const GAME_CONTEXT_MAX_BYTES = 14000;
+const GAME_CONTEXT_PARTIAL = '[Game context partial: truncated by bridge at 14000 UTF-8 bytes.]';
+function normalizeGameContext(value) {
+  const text = String(value || '').replace(/\r/g, '').trim();
+  const bytes = Buffer.from(text, 'utf8');
+  if (bytes.length <= GAME_CONTEXT_MAX_BYTES) return text;
+  let end = GAME_CONTEXT_MAX_BYTES - Buffer.byteLength('\n' + GAME_CONTEXT_PARTIAL, 'utf8');
+  // A cut before a continuation byte would leave a partial UTF-8 character.
+  while ((bytes[end] & 0xc0) === 0x80) end--;
+  const newline = bytes.lastIndexOf(0x0a, end);
+  if (newline >= 0) end = newline;
+  return bytes.subarray(0, end).toString('utf8').trimEnd() + '\n' + GAME_CONTEXT_PARTIAL;
+}
+
 // Flags field: ';'-separated tokens. "n" = fresh agent session, "h" = hello
 // (no prompt), "d" = the player deleted this chat: forget its transcript and
 // session (no prompt), "allow=Rule1,Rule2" = add these permission rules before
@@ -594,7 +611,7 @@ module.exports = {
   fromHex, pad3, slotNumber, chatKey, sessKey,
   alreadyHandled, markHandled, pruneStale, MONTH_MS,
   resolveCwd, sameFolder, baseName,
-  parseFlags, jobsFromStrip, parseOutbox, systemPrompt, splitSummary,
+  normalizeGameContext, parseFlags, jobsFromStrip, parseOutbox, systemPrompt, splitSummary,
   ruleFor, describeToolUse,
   luaStr, luaTable, SILENT_WAV,
   MAP_LIMITS, validateMapCommand, newMap, applyMapCommands, extractMapBlocks, parseMapFile, luaMap,
